@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.egg-info/
+.ipynb_checkpoints/
+# data and artifacts stay local
+/data/
+*.parquet
+*.csv
+*.zst
+*.h5
+checkpoints/
+outputs/
+multirun/
+wandb/
+mlruns/
