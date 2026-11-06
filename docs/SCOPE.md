@@ -35,7 +35,7 @@ Train on unlabeled NOAA AIS for US waters, and evaluate on synthetic anomalies p
 | [OMTAD](https://ro.ecu.edu.au/ecuworkspost2013/11764) | Benchmark evaluation | Australian SAR region, 2018 to 2020 | Cleaned tracks by month | Cargo, tanker, fishing, passenger; journeys of 10+ hours, no gaps; CC BY-NC license |
 | [Equation-grounded anomaly benchmark](https://github.com/snudial/open-maritime-anomaly-detection) | Labeled test sets | Built on OMTAD | Timestamp-level labels | Anomaly types A1 (spoofing-like jumps), A2 (route deviation), A3 (close approach) |
 
-NOAA files are large, so start with one region (Gulf of Mexico or Chesapeake approaches, still to be decided) and three months. Scale up only after the pipeline works end to end. OMTAD covers Australian waters, which also lines up with Oceania-region work.
+NOAA files are large, so start with one region (Chesapeake Bay and Hampton Roads) and three months. That area mixes deep-draft traffic into Baltimore and Norfolk with tugs, ferries, and Navy vessels, so it is a harder and more defense-relevant baseline than a pure container port. Scale up only after the pipeline works end to end. OMTAD covers Australian waters, which also lines up with Oceania-region work.
 
 **Preprocessing pipeline**
 

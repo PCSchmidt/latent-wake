@@ -33,7 +33,7 @@ flowchart LR
 
 | Dataset | Role |
 | --- | --- |
-| [NOAA MarineCadastre AIS](https://marinecadastre.gov/ais) | Pretraining on normal US coastal traffic |
+| [NOAA MarineCadastre AIS](https://marinecadastre.gov/ais) | Pretraining on normal traffic in Chesapeake Bay and Hampton Roads (three months to start) |
 | [OMTAD](https://ro.ecu.edu.au/ecuworkspost2013/11764) | Benchmark evaluation (Australian waters, CC BY-NC, not redistributed here) |
 | [Equation-grounded anomaly benchmark](https://github.com/snudial/open-maritime-anomaly-detection) | Labeled test sets (A1 spoofing-like, A2 route deviation, A3 close approach) |
 
@@ -54,8 +54,6 @@ Synthetic anomalies (position spoof, teleport, route deviation, loitering, rende
 | 2. JEPA and quick baselines | 4–6 | JEPA trains without collapse across 3 seeds |
 | 3. Full evaluation and ablations | 7–9 | Results tables frozen |
 | 4. Darkwater demo panel and write-up | 10–12 | Repo, write-up, and demo shipped |
-
-**Open decision:** the NOAA pretraining region.
 
 ## Repository layout
 
