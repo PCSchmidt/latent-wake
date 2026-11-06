@@ -10,7 +10,7 @@ dependencies = [
   "torch>=2.4",
   "numpy",
   "polars",
-  "duckdb",
+  "duckdb>=1.1",
   "pyarrow",
   "hydra-core",
   "scikit-learn",
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "jupyter", "matplotlib"]
+dev = ["pytest", "ruff", "jupyter", "matplotlib", "pandas"]
 tracking = ["wandb"]
 
 [build-system]

@@ -74,6 +74,29 @@ latent-wake/
 
 Python 3.11, PyTorch (CUDA), uv, Hydra, Polars + DuckDB, Weights & Biases or MLflow, pytest.
 
+## Getting started
+
+```bash
+git clone https://github.com/PCSchmidt/latent-wake.git
+cd latent-wake
+uv venv --python 3.11
+# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
+uv pip install -e ".[dev]"
+pytest -q
+```
+
+### Step 1: download and crop AIS data
+
+```bash
+python -m latentwake.data.download --region chesapeake --start 2025-04-01 --end 2025-06-30
+```
+
+This streams each NOAA national daily file (`ais-YYYY-MM-DD.csv.zst`), crops it to the Chesapeake Bay and Hampton Roads box with DuckDB, writes `data/interim/chesapeake/ais-YYYY-MM-DD.parquet`, and deletes the national file. Re-running skips finished days. `data/interim/chesapeake/manifest.jsonl` records rows, vessels, and any failures for each day.
+
+Useful flags: `--workers 2` (days in parallel), `--keep-raw` (keep national files, which are large), `--memory-limit 4GB` (DuckDB memory per worker). Try a single day first (`--start 2025-04-01 --end 2025-04-01`) and check the manifest's `missing_optional` field to confirm the schema matched.
+
+The box in `latentwake/data/regions.py` is a loose first pass. Plot the first day's points and tighten it if needed. Only 2025-and-later daily files are supported so far.
+
 ## Related projects
 
 - [Darkwater](https://github.com/PCSchmidt/darkwater): maritime shadow-fleet demo. Latent Wake scores will feed a ranked-vessel panel there.
