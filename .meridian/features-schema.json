@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Meridian Features",
+  "description": "Lifecycle-aware feature completion tracking. Each feature tracks five implementation sub-states. A feature is only 'done' when all five are true — happy_path alone is not done.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["id", "name", "source_section", "lifecycle"],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Slug identifier derived from the feature name (lowercase, hyphens)"
+      },
+      "name": {
+        "type": "string",
+        "description": "Human-readable feature name from the SPEC.md section heading"
+      },
+      "source_section": {
+        "type": "string",
+        "description": "The exact SPEC.md heading this feature was seeded from"
+      },
+      "lifecycle": {
+        "type": "object",
+        "description": "Five sub-states. All must be true for the feature to count as complete.",
+        "required": ["happy_path", "integration", "edge_cases", "error_handling", "hardening"],
+        "additionalProperties": false,
+        "properties": {
+          "happy_path": {
+            "type": "boolean",
+            "description": "Core use case works under normal conditions"
+          },
+          "integration": {
+            "type": "boolean",
+            "description": "Works correctly with adjacent features and external systems"
+          },
+          "edge_cases": {
+            "type": "boolean",
+            "description": "Handles boundary conditions and unusual inputs"
+          },
+          "error_handling": {
+            "type": "boolean",
+            "description": "Fails gracefully with informative errors"
+          },
+          "hardening": {
+            "type": "boolean",
+            "description": "Performance, security, and production-readiness concerns addressed"
+          }
+        }
+      }
+    }
+  }
+}

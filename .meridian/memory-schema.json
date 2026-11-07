@@ -1,0 +1,297 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/PCSchmidt/meridian/memory-schema.json",
+  "title": "Meridian Memory Schema",
+  "description": "JSON schema for Meridian's three-tier memory system",
+  "version": "1.0",
+
+  "definitions": {
+    "semantic_pattern": {
+      "type": "object",
+      "description": "A validated pattern from cross-project experience",
+      "required": ["pattern_id", "description", "context", "confidence", "validated_count", "hash", "created", "last_validated"],
+      "properties": {
+        "pattern_id": {
+          "type": "string",
+          "pattern": "^PAT-[A-Z0-9]+-[0-9]{3}$",
+          "description": "Unique pattern identifier (e.g., PAT-DGCAL-001)",
+          "examples": ["PAT-DGCAL-001", "PAT-FTEST-002"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500,
+          "description": "Clear description of the pattern"
+        },
+        "context": {
+          "type": "string",
+          "minLength": 10,
+          "description": "When/where this pattern applies"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH"],
+          "description": "Confidence level based on validation count"
+        },
+        "validated_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of times this pattern has been validated"
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 hash for deduplication"
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of pattern creation"
+        },
+        "last_validated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of last validation"
+        },
+        "source_projects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Projects where this pattern was validated"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "episodic_event": {
+      "type": "object",
+      "description": "A session event or gate outcome",
+      "required": ["timestamp", "event_type", "session_id"],
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of event"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "session_start",
+            "session_end",
+            "gate_passed",
+            "gate_blocked",
+            "stop_event",
+            "feature_complete",
+            "error_logged"
+          ],
+          "description": "Type of event"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{8}$",
+          "description": "8-character hex session identifier"
+        },
+        "gate": {
+          "type": "string",
+          "description": "Gate ID if applicable"
+        },
+        "project": {
+          "type": "string",
+          "description": "Project name"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["pass", "fail", "warn", "block"],
+          "description": "Event outcome if applicable"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Additional notes about the event"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files created or modified"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "correction": {
+      "type": "object",
+      "description": "A reflexion entry with predicted vs actual comparison",
+      "required": [
+        "session_id",
+        "gate",
+        "date",
+        "project",
+        "root_cause",
+        "action_next"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{8}$",
+          "description": "8-character hex session identifier"
+        },
+        "gate": {
+          "type": "string",
+          "description": "Gate ID (e.g., v0.3.0, frontend_approved)"
+        },
+        "date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of gate completion"
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Project name"
+        },
+        "predicted_hours": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMinimum": true,
+          "description": "Estimated hours from VERSION_ROADMAP.md"
+        },
+        "actual_hours": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMinimum": true,
+          "description": "Actual hours from TIMELOG.md or git history"
+        },
+        "delta_ratio": {
+          "type": "number",
+          "description": "Actual / Predicted (1.0 = perfect estimate)"
+        },
+        "variance_percent": {
+          "type": "number",
+          "description": "Percentage variance ((actual - predicted) / predicted * 100)"
+        },
+        "root_cause": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000,
+          "description": "Analysis of why estimate was off"
+        },
+        "action_next": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1000,
+          "description": "How to adjust future estimates"
+        },
+        "semantic_pattern_id": {
+          "type": "string",
+          "pattern": "^PAT-[A-Z0-9]+-[0-9]{3}$",
+          "description": "Pattern ID if this correction generated a semantic pattern"
+        },
+        "errors_open": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Error count at session start"
+        },
+        "errors_close": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Error count at gate close"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+
+  "oneOf": [
+    {
+      "type": "object",
+      "description": "Semantic memory file",
+      "required": ["schema_version", "memory_type", "patterns"],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0"
+        },
+        "memory_type": {
+          "type": "string",
+          "const": "semantic"
+        },
+        "project": {
+          "type": "string",
+          "description": "Project name (omit for global semantic memory)"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/semantic_pattern"
+          },
+          "description": "Array of validated patterns"
+        },
+        "last_updated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Episodic memory event (JSONL - one per line)",
+      "$ref": "#/definitions/episodic_event"
+    },
+    {
+      "type": "object",
+      "description": "Correction entry (JSONL - one per line)",
+      "$ref": "#/definitions/correction"
+    }
+  ],
+
+  "examples": [
+    {
+      "schema_version": "1.0",
+      "memory_type": "semantic",
+      "project": "example-project",
+      "patterns": [
+        {
+          "pattern_id": "PAT-FTEST-001",
+          "description": "Frontend tasks with >8 components require 1.5x time multiplier",
+          "context": "When implementing frontend features with more than 8 components",
+          "confidence": "HIGH",
+          "validated_count": 5,
+          "hash": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+          "created": "2026-05-01T10:00:00Z",
+          "last_validated": "2026-05-28T14:30:00Z",
+          "source_projects": ["project-a", "project-b", "project-c"]
+        }
+      ],
+      "last_updated": "2026-05-28T14:30:00Z"
+    },
+    {
+      "timestamp": "2026-05-28T14:23:11Z",
+      "event_type": "gate_passed",
+      "session_id": "abc12345",
+      "gate": "frontend_approved",
+      "project": "example-project",
+      "outcome": "pass",
+      "notes": "All components approved",
+      "artifacts": ["FRONTEND_SPEC.md", "DESIGN_SYSTEM.md"]
+    },
+    {
+      "session_id": "abc12345",
+      "gate": "v0.3.0",
+      "date": "2026-05-28T14:23:11Z",
+      "project": "example-project",
+      "predicted_hours": 4.0,
+      "actual_hours": 6.0,
+      "delta_ratio": 1.5,
+      "variance_percent": 50.0,
+      "root_cause": "Underestimated component complexity - 12 components vs estimated 6",
+      "action_next": "Apply 1.5x multiplier to frontend estimates with >8 components",
+      "semantic_pattern_id": "PAT-FTEST-001",
+      "errors_open": 2,
+      "errors_close": 0
+    }
+  ]
+}

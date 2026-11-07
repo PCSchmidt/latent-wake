@@ -1,0 +1,13 @@
+# Paths used by the Meridian gate checks (scripts/validate-*.sh, run-benchmark.sh).
+# One place to change them; the checks read nothing else.
+interim: data/interim/chesapeake
+processed: data/processed/chesapeake
+testset: data/testsets/chesapeake-test-v1
+out: reports/eval-v1
+contract: DATA_CONTRACT.md
+
+# Models scored by run-benchmark.sh. Name seeds METHOD-sN so the contract
+# check averages them (for example jepa-s0, jepa-s1, jepa-s2).
+models: {}
+#  jepa-s0: runs/jepa-s0/best.pt
+#  raw-s0: runs/raw-s0/best.pt

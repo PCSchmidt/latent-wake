@@ -157,6 +157,27 @@ python -m latentwake.data.preprocess --interim data/interim/synthetic --out data
 
 `latentwake.data.synthetic` writes days in exactly the download step's format: simple ship kinematics (transits, tugs, ferries, fishing boats, anchored ships) with realistic reporting flaws. It has no coastline and is not a model of the real bay. It exists for tests and for building the model before real data arrives.
 
+## Governance: Meridian gates
+
+This project runs under [Meridian](https://github.com/PCSchmidt/meridian) (`ml-research` recipe), adapted to the 12-week plan. Each phase ends at a gate that a script, not an agent's say-so, decides:
+
+| Gate | Passes when | Check |
+|---|---|---|
+| `data_contract` (owner approves) | DATA_CONTRACT.md has no open `[DECIDE]` items and complete thresholds | `validate-data-contract.sh` |
+| `pipeline_validated` | Real data cropped with no failed days, splits leak-free, test set frozen | `validate-schema/preprocessing/splits/testset.sh`, unit tests |
+| `training_stable` | Three or more seeds per latent model, none collapsed | `validate-training.sh` |
+| `model_eval` (owner approves) | Every model trained after the test set froze; every contract criterion met | `run-benchmark.sh`, `validate-metrics.sh` |
+| `ablation_study` (owner approves) | ABLATION_RESULTS.md written | — |
+| `demo_shipped` (owner approves) | Write-up, model card, changelog; full test suite green | `run-all-tests.sh` |
+
+```bash
+bash scripts/gate-engine.sh current                 # which gate is open
+bash scripts/gate-engine.sh verify data_contract    # run its checks
+bash scripts/gate-engine.sh mark-passed data_contract --approve "DATA CONTRACT APPROVED"   # owner only
+```
+
+Paths for every check live in `configs/eval.yaml`. The checks themselves are in `latentwake/checks.py`; each exits 2 to block. The success criteria are in [`DATA_CONTRACT.md`](DATA_CONTRACT.md), and the decision log is in [`DECISIONS.md`](DECISIONS.md). Meridian needs `jq` and [mikefarah's `yq`](https://github.com/mikefarah/yq).
+
 ## Related projects
 
 - [Darkwater](https://github.com/PCSchmidt/darkwater): maritime shadow-fleet demo. Latent Wake scores will feed a ranked-vessel panel there.

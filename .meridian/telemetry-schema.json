@@ -1,0 +1,182 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/PCSchmidt/meridian/telemetry-schema.json",
+  "title": "Meridian Telemetry Schema",
+  "description": "JSON schema for telemetry events written to .meridian/telemetry.jsonl",
+  "version": "1.0",
+
+  "definitions": {
+    "base_event": {
+      "type": "object",
+      "required": ["timestamp", "event_type", "session_id", "project"],
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 UTC timestamp"
+        },
+        "event_type": {
+          "type": "string",
+          "description": "Type of telemetry event"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{8}$",
+          "description": "8-character hex session identifier"
+        },
+        "project": {
+          "type": "string",
+          "description": "Project name"
+        },
+        "gate": {
+          "type": "string",
+          "description": "Gate ID if event is gate-related"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Duration of the operation in seconds"
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Phase 2 stub: input tokens consumed. Not captured in Phase 1; field reserved for forward-compatible cost tracking (see MERIDIAN_ARCHITECTURE_DECISIONS.md Decision 4)."
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Phase 2 stub: output tokens produced. Not captured in Phase 1; reserved for cost tracking."
+        },
+        "cost_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Phase 2 stub: estimated USD cost for the operation. Not captured in Phase 1; reserved for cost tracking."
+        }
+      }
+    }
+  },
+
+  "oneOf": [
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "gate_passed" },
+        "gate": { "type": "string" },
+        "artifacts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Files created or modified to pass the gate"
+        },
+        "predicted_hours": { "type": "number", "minimum": 0 },
+        "actual_hours": { "type": "number", "minimum": 0 }
+      },
+      "required": ["gate"]
+    },
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "gate_blocked" },
+        "gate": { "type": "string" },
+        "reason": { "type": "string", "description": "Why the gate was blocked" },
+        "blocking_dep": { "type": "string", "description": "Dependency that caused the block" }
+      },
+      "required": ["gate", "reason"]
+    },
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "tool_used" },
+        "tool": { "type": "string", "description": "Claude Code tool name" },
+        "hook": { "type": "string", "enum": ["PreToolUse", "PostToolUse"] },
+        "file_path": { "type": "string" },
+        "outcome": { "type": "string", "enum": ["allowed", "blocked", "warned"] }
+      },
+      "required": ["tool", "hook"]
+    },
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "evaluator_verdict" },
+        "gate": { "type": "string" },
+        "score": { "type": "number", "minimum": 0, "maximum": 10 },
+        "verdict": { "type": "string", "enum": ["pass", "fail", "warn"] },
+        "evaluator": { "type": "string", "description": "Which evaluator subagent ran" },
+        "notes": { "type": "string" }
+      },
+      "required": ["gate", "score", "verdict"]
+    },
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "memory_write" },
+        "memory_type": { "type": "string", "enum": ["semantic", "episodic", "corrections"] },
+        "validation": { "type": "string", "enum": ["pass", "fail"] },
+        "patterns_count": { "type": "integer", "minimum": 0 },
+        "duplicates_removed": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["memory_type", "validation"]
+    },
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "session_start" },
+        "meridian_version": { "type": "string" },
+        "gates_yaml": { "type": "string", "description": "Active gates.yaml path" },
+        "current_gate": { "type": "string" }
+      }
+    },
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "session_end" },
+        "tools_used": { "type": "integer", "minimum": 0 },
+        "gates_passed": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 }
+      }
+    },
+    {
+      "allOf": [{ "$ref": "#/definitions/base_event" }],
+      "properties": {
+        "event_type": { "const": "error" },
+        "error_code": { "type": "string" },
+        "message": { "type": "string" },
+        "context": { "type": "string" },
+        "recoverable": { "type": "boolean" }
+      },
+      "required": ["message"]
+    }
+  ],
+
+  "examples": [
+    {
+      "timestamp": "2026-05-29T01:00:00Z",
+      "event_type": "gate_passed",
+      "session_id": "97f80170",
+      "project": "meridian",
+      "gate": "1.3",
+      "artifacts": [".claude/hooks/hook-wrapper.sh", ".claude/hooks/PreToolUse.sh"],
+      "predicted_hours": 8.0,
+      "actual_hours": 8.0
+    },
+    {
+      "timestamp": "2026-05-29T01:00:05Z",
+      "event_type": "tool_used",
+      "session_id": "97f80170",
+      "project": "meridian",
+      "tool": "Edit",
+      "hook": "PostToolUse",
+      "file_path": ".meridian/memory/semantic.json",
+      "outcome": "allowed"
+    },
+    {
+      "timestamp": "2026-05-29T01:00:10Z",
+      "event_type": "memory_write",
+      "session_id": "97f80170",
+      "project": "meridian",
+      "memory_type": "semantic",
+      "validation": "pass",
+      "patterns_count": 2,
+      "duplicates_removed": 0
+    }
+  ]
+}

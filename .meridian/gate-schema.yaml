@@ -1,0 +1,141 @@
+# Meridian Gate Schema Definition
+# This file documents the structure of a valid gates.yaml file
+# Use this as a reference when creating custom gate definitions
+
+version: "1.0"  # Schema version
+
+# Project metadata
+project:
+  name: "example-project"          # Project name
+  recipe: "fullstack-web"          # Recipe being used
+  description: "Example gate DAG"  # Optional description
+
+# Gate definitions
+# Gates are the checkpoints in your project workflow
+gates:
+  # Each gate has an ID and configuration
+  - id: confirmed                  # Unique gate identifier (required)
+    label: "Project Confirmed"     # Human-readable name (required)
+    type: human_approval           # Gate type: human_approval or automated (required)
+    required: true                 # Cannot be skipped (default: true)
+
+    # Approval configuration (for human_approval type)
+    approval_token: "CONFIRMED"    # Exact string user must type to approve
+
+    # Dependencies - gates that must complete before this one
+    requires: []                   # List of gate IDs (empty = no dependencies)
+
+    # Artifacts - files that must exist to pass this gate
+    requires_artifacts:
+      - CONTRACT.md
+      - SPEC.md
+      - DECISIONS.md
+
+    # Hooks - scripts to run at gate transition
+    hooks:
+      pre:                         # Run before gate approval
+        - validate-contract.sh
+        - validate-spec.sh
+      post:                        # Run after gate approval
+        - write-reflexion.sh
+        - emit-telemetry.sh
+
+    # Artifact emitted when gate passes
+    emits: CONFIRMED_GATE.json     # Optional output artifact
+
+    # Action on failure
+    on_fail: block_all_writes      # block_all_writes, block_gate_writes, warn
+
+  # Example of automated gate
+  - id: tests_passing
+    label: "Tests Passing"
+    type: automated               # No human approval needed
+    required: true
+
+    requires:
+      - confirmed                 # Depends on 'confirmed' gate
+
+    hooks:
+      pre:
+        - run-tests.sh            # Runs tests, exits 2 if fail
+
+    pass_condition: "exit_code == 0"  # Test hook must succeed
+    emits: TEST_GATE.json
+    on_fail: block_write
+
+  # Example with multiple dependencies
+  - id: ready_to_ship
+    label: "Ready to Ship"
+    type: human_approval
+    required: true
+    approval_token: "SHIP"
+
+    requires:
+      - tests_passing            # Must have tests passing
+      - security_scan            # AND security scan complete
+
+    requires_artifacts:
+      - DEPLOYMENT_CONFIG.md
+      - CHANGELOG.md
+
+    hooks:
+      pre:
+        - validate-deployment.sh
+      post:
+        - tag-release.sh
+
+    emits: DEPLOY_APPROVED
+    on_fail: block_all_writes
+
+  # Example of optional gate
+  - id: security_scan
+    label: "Security Scan"
+    type: automated
+    required: false               # Optional - can skip with warning
+
+    requires:
+      - tests_passing
+
+    hooks:
+      pre:
+        - run-security-audit.sh
+
+    pass_condition: "exit_code == 0"
+    on_fail: warn                 # Only warns, doesn't block
+
+# Gate type definitions
+# Built-in types (v0.1.0):
+#   - human_approval: Requires user to type approval_token
+#   - automated: Runs hooks, passes if all exit 0
+#
+# Future types (planned for v0.2.0+):
+#   - external: Blocks until webhook/CLI signal
+#   - conditional: Passes if metric > threshold
+#   - scheduled: Time-based gate
+
+# Valid 'requires' values:
+#   - [] (empty list): No dependencies, can start immediately
+#   - [gate_id]: Depends on one gate
+#   - [gate_id1, gate_id2]: Depends on multiple (AND logic)
+
+# Valid 'on_fail' values:
+#   - block_all_writes: Blocks all Write/Edit tool calls
+#   - block_gate_writes: Blocks only artifact writes for this gate
+#   - warn: Shows warning but doesn't block
+
+# Hook execution order:
+#   1. Check gate dependencies (requires)
+#   2. Check required artifacts exist
+#   3. Run pre-hooks in order
+#   4. If automated: check pass_condition
+#   5. If human_approval: wait for approval_token
+#   6. Run post-hooks in order
+#   7. Write emitted artifact (if specified)
+#   8. Log to telemetry
+
+# Circular dependency detection:
+# The gate engine validates the DAG at install time
+# Circular dependencies are rejected with clear error message
+
+# Example error:
+#   "Circular dependency detected: confirmed → tests → deploy → confirmed"

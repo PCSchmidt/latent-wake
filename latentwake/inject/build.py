@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import io
 import json
@@ -135,7 +136,9 @@ def save_test_set(ts: TestSet, out_dir: Path, info: dict | None = None) -> str:
     (out_dir / "cells.csv").write_bytes(cells_csv.encode())
     digest = _digest(ts.X, ts.step_label, cells_csv)
     counts = ts.cells.groupby("kind").size().to_dict()
-    manifest = {"sha256": digest, "features": FEATURES, "n": int(len(ts.cells)), "counts": counts, **(info or {})}
+    frozen_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    manifest = {"sha256": digest, "frozen_at": frozen_at, "features": FEATURES, "n": int(len(ts.cells)),
+                "counts": counts, **(info or {})}
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return digest
 
