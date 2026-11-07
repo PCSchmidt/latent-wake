@@ -77,6 +77,25 @@ Per-cell tables are produced by `latentwake.evaluate` (`summary.md`).
    Every learned model beats Kalman and the physics check on loitering; route
    deviation stays hard for everyone.
 
+## Fused detector (added after the headline-claim decision)
+
+`fused` = the larger of the JEPA's and the Kalman filter's window z-scores,
+each calibrated per vessel class on validation windows. Kinds are weighted
+equally.
+
+| method | AUROC, all kinds | AUPRC, all kinds | AUROC, behavioral | AUPRC, behavioral |
+|:--|--:|--:|--:|--:|
+| fused | **0.871** | **0.585** | 0.775 | 0.328 |
+| kalman | 0.806 | 0.574 | 0.610 | 0.172 |
+| raw | 0.810 | 0.558 | 0.743 | **0.464** |
+| jepa | 0.770 | 0.322 | **0.785** | 0.373 |
+
+By AUROC, fusion beats both of its parts (+0.065 over Kalman, +0.10 over
+the JEPA). By AUPRC, it barely beats Kalman (+0.011): taking a max gives each
+normal window two chances to score high, which costs precision. Whether the
+contract gates on AUROC, AUPRC, or both is an owner decision. The raw-target
+model fused with Kalman is a natural comparison point for the real runs.
+
 ## What this means for DATA_CONTRACT.md
 
 A "JEPA beats Kalman on every kind" criterion would fail on this evidence, and

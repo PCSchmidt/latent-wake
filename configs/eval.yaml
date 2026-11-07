@@ -6,6 +6,10 @@ testset: data/testsets/chesapeake-test-v1
 out: reports/eval-v1
 contract: DATA_CONTRACT.md
 
+# The combined detector: max of the JEPA's and Kalman's window z-scores, both
+# calibrated on validation. Models named jepa or jepa-sN yield fused / fused-sN.
+fuse_with_kalman: jepa
+
 # Models scored by run-benchmark.sh. Name seeds METHOD-sN so the contract
 # check averages them (for example jepa-s0, jepa-s1, jepa-s2).
 models: {}

@@ -6,7 +6,7 @@
 **Framework:** Meridian (ml-research recipe)
 
 This document is the single source of truth for what this experiment is trying
-to show. The agent implements; the human decides. Every `[DECIDE ...]` marker
+to show. The agent implements; the human decides. Every DECIDE marker (square brackets, starting with DECIDE)
 is a decision only the owner makes. `scripts/validate-data-contract.sh` blocks
 the `data_contract` gate while any marker remains or any threshold is empty.
 Once the gate passes, these thresholds are what `validate-metrics.sh` scores
@@ -108,27 +108,40 @@ no vessel and no time period appears on both sides. Enforced by
 
 ## Success Metric
 
+**Headline claim (owner decision, 2026-11-07):** the JEPA catches behavioral
+anomalies that physics-based detection misses, and adding it to a Kalman
+filter gives a better detector than either one alone.
+
 `model_eval` passes only if **every** criterion in the block below holds,
-computed from `reports/eval-v1/results.csv` and averaged over the severity
-levels of the listed kinds and over seeds. Kinds are `position_spoof`,
-`teleport`, `ais_gap` (kinematically inconsistent) and `loitering`,
-`route_deviation` (behavioral). Behavioral kinds are always scored against
-moving normal vessels only.
+computed from `reports/eval-v1/results.csv`. Each method's score is the mean
+over each kind's severity cells, then weighted equally across the listed
+kinds, then averaged across seeds (`jepa-s0`, `jepa-s1`, ...). Kinds are
+`position_spoof`, `teleport`, `ais_gap` (kinematically inconsistent) and
+`loitering`, `route_deviation` (behavioral). Behavioral kinds are always
+scored against moving normal vessels only.
 
-What the synthetic smoke run suggests (small model, CPU, synthetic data only):
-the Kalman filter is near 1.0 AUROC on spoofs and teleports while the JEPA is
-near 0.75; the JEPA is near 0.94 on loitering while Kalman is near 0.64. A
-JEPA-beats-Kalman-everywhere criterion would likely fail on the kinematic
-kinds. The raw-target ablation also beat the JEPA on spoofs and teleports, so a
-latent-beats-raw criterion would fail today on those kinds (one seed, small
-model; see `reports/synthetic-smoke.md` for the caveats and a hypothesis). The
-decision below is what result counts as a success worth reporting.
+**The combined detector (`fused`)** is fixed before any real data and fits
+nothing to a test set. Each detector's window score is turned into a robust
+z-score per vessel class using validation windows (median and MAD). The
+fused score is the larger of the JEPA's z and the Kalman filter's z.
+Implemented in `latentwake/evaluate.py` (`model_scores`); `jepa-sN` yields
+`fused-sN`.
 
-[DECIDE: the project's headline claim. Options: (a) the JEPA beats Kalman on
-behavioral anomalies by a margin while staying within a tolerance of it on
-kinematic ones; (b) a combined detector (JEPA plus Kalman) beats either alone;
-(c) an honest comparison with no win required, where success means the full
-evaluation is complete and reproducible. Then fill in the margins below.]
+**What the synthetic smoke run shows** (small model, one seed, CPU, synthetic
+data only; see `reports/synthetic-smoke.md`):
+
+| Criterion | AUROC difference | AUPRC difference |
+|---|--:|--:|
+| JEPA minus Kalman, behavioral kinds | +0.175 | +0.201 |
+| Fused minus Kalman, all kinds | +0.065 | +0.011 |
+| Fused minus JEPA, all kinds | +0.101 | +0.263 |
+
+The AUPRC column matters. Taking the max of two scores gives each normal
+window two chances to score high, which costs precision. By AUPRC, the fused
+detector barely beats Kalman on this run.
+
+[DECIDE: gate on AUROC, on AUPRC, or on both. If both, duplicate each
+criterion below with `metric: auprc` and its own margin.]
 
 ```yaml contract-thresholds
 criteria:
@@ -138,22 +151,26 @@ criteria:
     kinds: [loitering, route_deviation]
     vs_method: kalman
     margin: null        # [DECIDE: required lead over Kalman, for example 0.10]
-  - id: kinematic_parity_with_kalman
+  - id: fused_beats_kalman
     metric: auroc
-    method: jepa
-    kinds: [position_spoof, teleport, ais_gap]
-    vs_method: kalman
-    margin: null        # [DECIDE: allowed shortfall versus Kalman, for example -0.10]
-  - id: latent_beats_raw_target
-    metric: auroc
-    method: jepa
+    method: fused
     kinds: [position_spoof, teleport, ais_gap, loitering, route_deviation]
-    vs_method: raw
-    margin: null        # [DECIDE: required lead over the raw-target ablation, for example 0.0]
+    vs_method: kalman
+    margin: null        # [DECIDE: required lead over Kalman alone, for example 0.03]
+  - id: fused_beats_jepa
+    metric: auroc
+    method: fused
+    kinds: [position_spoof, teleport, ais_gap, loitering, route_deviation]
+    vs_method: jepa
+    margin: null        # [DECIDE: required lead over the JEPA alone, for example 0.03]
 ```
 
-Operating-point metrics (false alarms per 1,000 vessel-hours, time to detect)
-are reported but not gated. [DECIDE: keep them ungated, or add a criterion.]
+**Reported, not gated:**
+- JEPA versus Kalman on kinematic kinds (parity). The fused detector covers these.
+- JEPA versus the raw-target ablation (does latent space help?), and the raw
+  target fused with Kalman as a comparison point for the fused detector.
+- Operating-point metrics: false alarms per 1,000 vessel-hours and time to
+  detect. [DECIDE: keep them ungated, or add a criterion.]
 
 ---
 

@@ -160,7 +160,26 @@ def test_train_and_evaluate_end_to_end(tmp_path):
 
     X, meta, raw = pp.load_split(tmp_path / "processed", "test", normalized=False, raw=True)
     save_test_set(build_test_set(X, raw, meta, seed=0, per_cell=5), tmp_path / "ts")
-    res = evaluate(tmp_path / "ts", tmp_path / "processed", {"jepa": tmp_path / "run" / "best.pt"}, tmp_path / "eval")
-    assert set(res.method) == {"physics", "kalman", "jepa"}
+    models = {"jepa-s0": tmp_path / "run" / "best.pt", "jepa-s1": tmp_path / "run" / "best.pt"}
+    res = evaluate(tmp_path / "ts", tmp_path / "processed", models, tmp_path / "eval", fuse_with_kalman="jepa")
+    assert set(res.method) == {"physics", "kalman", "jepa-s0", "jepa-s1", "fused-s0", "fused-s1"}
+    with pytest.raises(ValueError, match="matched no model"):
+        evaluate(tmp_path / "ts", tmp_path / "processed", models, tmp_path / "eval2", fuse_with_kalman="nope")
     assert res.auroc.between(0, 1).all()
     assert (tmp_path / "eval" / "summary.md").read_text().startswith("## AUROC")
+
+
+def test_window_z_and_fusion_are_scale_free():
+    from latentwake.evaluate import _window_z
+
+    rng = np.random.default_rng(0)
+    vclass = np.r_[np.zeros(400, int), np.ones(400, int)]
+    small = rng.gamma(2.0, 1.0, 800)                 # e.g. JEPA window scores
+    big = 1000 * rng.gamma(2.0, 1.0, 800)            # e.g. Kalman NIS, another scale
+    z_small = _window_z(small, vclass, small, vclass)
+    z_big = _window_z(big, vclass, big, vclass)
+    for z in (z_small, z_big):
+        for c in (0, 1):
+            assert abs(np.median(z[vclass == c])) < 1e-9
+    # Same calibrated scale regardless of the raw units.
+    assert 0.5 < np.median(np.abs(z_big)) / np.median(np.abs(z_small)) < 2.0

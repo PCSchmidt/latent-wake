@@ -217,18 +217,26 @@ def run_benchmark(cfg_path: Path) -> None:
     check_testset(Path(cfg["testset"]), Path(cfg["processed"]))
     check_freeze_order(cfg)
     out = Path(cfg["out"])
-    evaluate(Path(cfg["testset"]), Path(cfg["processed"]), {k: Path(v) for k, v in cfg["models"].items()}, out)
+    evaluate(Path(cfg["testset"]), Path(cfg["processed"]), {k: Path(v) for k, v in cfg["models"].items()}, out,
+             cfg.get("fuse_with_kalman"))
     _ok(f"results written to {out}")
 
 
 # ------------------------------------------------------------------- metrics
 
 def _method_mean(results: pd.DataFrame, method: str, metric: str, kinds: list[str]) -> float:
-    """Mean over the kinds' severity cells, averaged across seeds named METHOD-sN."""
+    """Mean over each kind's severity cells, then equally across kinds, then across seeds METHOD-sN.
+
+    Weighting kinds equally keeps a kind with many severity levels (AIS gaps
+    have 9) from outweighing one with few (loitering has 3).
+    """
     sel = results[(results.method == method) | results.method.str.startswith(method + "-s")]
     sel = sel[sel.kind.isin(kinds)]
     _need(len(sel) > 0, f"no results for method '{method}' on kinds {kinds}")
-    return float(sel.groupby("method")[metric].mean().mean())
+    missing = set(kinds) - set(sel.kind)
+    _need(not missing, f"method '{method}' has no results for kinds {sorted(missing)}")
+    per_seed = sel.groupby(["method", "kind"])[metric].mean().groupby("method").mean()
+    return float(per_seed.mean())
 
 
 def evaluate_criteria(results: pd.DataFrame, criteria: list[dict]) -> list[dict]:

@@ -6,6 +6,8 @@ to review at the `data_contract` gate.
 
 | Date | Decision | Why | Alternatives considered | By |
 |------|----------|-----|-------------------------|----|
+| 2026-11-07 | Headline claim: JEPA beats Kalman on behavioral anomalies, and a fused JEPA+Kalman detector beats either alone. Kinematic parity and latent-vs-raw are reported, not gated | Synthetic smoke run suggests parity with Kalman on kinematic anomalies is unlikely; fusion lets the system cover them while the JEPA contributes behavioral detection | (a) alone with parity gated; (b) alone; (c) no win required | Owner |
+| 2026-11-07 | Fusion rule: max of window z-scores calibrated per vessel class on validation; kinds weighted equally in contract metrics | Nothing fit to the test set; window-level calibration puts both detectors on one scale; equal kind weights stop gaps (9 levels) outweighing loitering (3) | Learned fusion weights; rank averaging; cell-weighted means | Agent |
 | 2026-11-07 | Adopt Meridian (ml-research recipe), gates adapted to the 12-week plan | Lock metrics before real data; independent evaluation of result claims; memory across sessions | Continue without a harness | Owner |
 | 2026-11-07 | Loitering injector ramps into and out of the circle over 4 steps | An instant switch from transit speed to circling let a constant-velocity Kalman filter score 0.95 AUROC on an artifact; with the ramp, 0.64 | Instant switch | Agent |
 | 2026-11-07 | Score behavioral anomalies only against moving normal vessels | They are injected only into moving ships; against all normals, a physics check scored 0.73 by telling moving from anchored, 0.48 when matched | Score against all normals | Agent |

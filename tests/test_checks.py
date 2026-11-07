@@ -179,3 +179,8 @@ def test_collapse_signal_on_the_smoke_run_shapes():
     assert collapse_signal(healthy, 64) is None
     assert "fell" in collapse_signal(falling, 64) or "below" in collapse_signal(falling, 64)
     assert "below" in collapse_signal([30.0, 12.0], 64)
+
+
+def test_contract_intro_text_is_not_an_open_decision(tmp_path):
+    text = "Every DECIDE marker (square brackets, starting with DECIDE) is an owner decision.\n" + FILLED
+    checks.check_contract(_write(tmp_path, text))
