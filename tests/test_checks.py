@@ -184,3 +184,33 @@ def test_collapse_signal_on_the_smoke_run_shapes():
 def test_contract_intro_text_is_not_an_open_decision(tmp_path):
     text = "Every DECIDE marker (square brackets, starting with DECIDE) is an owner decision.\n" + FILLED
     checks.check_contract(_write(tmp_path, text))
+
+
+def test_operating_point_criteria():
+    import yaml
+
+    crit = yaml.safe_load("""
+criteria:
+  - {id: fpr, metric: fpr_at_budget, method: fused, kinds: [normal], op: "<=", value: 0.02}
+  - {id: det, metric: detect_at_budget, method: fused, kinds: [loitering], vs_method: kalman, margin: 0.0}
+""")["criteria"]
+    res = pd.DataFrame([
+        {"method": "fused-s0", "kind": "normal", "level": -1, "fpr_at_budget": 0.015},
+        {"method": "fused-s1", "kind": "normal", "level": -1, "fpr_at_budget": 0.019},
+        {"method": "fused-s0", "kind": "loitering", "level": 0, "detect_at_budget": 0.5},
+        {"method": "fused-s1", "kind": "loitering", "level": 0, "detect_at_budget": 0.4},
+        {"method": "kalman", "kind": "loitering", "level": 0, "detect_at_budget": 0.44},
+    ])
+    out = {r["id"]: r["passed"] for r in checks.evaluate_criteria(res, crit)}
+    assert out == {"fpr": True, "det": True}  # fpr 0.017 <= 0.02; detection 0.45 >= 0.44
+    res.loc[1, "fpr_at_budget"] = 0.05
+    assert not checks.evaluate_criteria(res, crit)[0]["passed"]
+
+
+def test_contract_rejects_bad_metric_and_op(tmp_path):
+    bad_metric = FILLED.replace("metric: auroc", "metric: accuracy", 1)
+    with pytest.raises(checks.Blocked, match="metric must be one of"):
+        checks.check_contract(_write(tmp_path, bad_metric))
+    bad_op = FILLED.replace("    vs_method: kalman\n    margin: 0.10", "    vs_method: kalman\n    margin: 0.10\n    op: \"<=\"")
+    with pytest.raises(checks.Blocked, match="op <= needs an absolute value"):
+        checks.check_contract(_write(tmp_path, bad_op))

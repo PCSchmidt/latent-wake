@@ -163,9 +163,12 @@ def test_train_and_evaluate_end_to_end(tmp_path):
     models = {"jepa-s0": tmp_path / "run" / "best.pt", "jepa-s1": tmp_path / "run" / "best.pt"}
     res = evaluate(tmp_path / "ts", tmp_path / "processed", models, tmp_path / "eval", fuse_with_kalman="jepa")
     assert set(res.method) == {"physics", "kalman", "jepa-s0", "jepa-s1", "fused-s0", "fused-s1"}
+    normals = res[res.kind == "normal"]
+    assert len(normals) == 6 and normals.fpr_at_budget.between(0, 1).all()
+    assert res[res.kind != "normal"].detect_at_budget.between(0, 1).all()
     with pytest.raises(ValueError, match="matched no model"):
         evaluate(tmp_path / "ts", tmp_path / "processed", models, tmp_path / "eval2", fuse_with_kalman="nope")
-    assert res.auroc.between(0, 1).all()
+    assert res[res.kind != "normal"].auroc.between(0, 1).all()
     assert (tmp_path / "eval" / "summary.md").read_text().startswith("## AUROC")
 
 

@@ -10,6 +10,10 @@ contract: DATA_CONTRACT.md
 # calibrated on validation. Models named jepa or jepa-sN yield fused / fused-sN.
 fuse_with_kalman: jepa
 
+# Alert budget: thresholds are set so this share of validation windows would
+# alert. The contract gates the test false-alarm rate and detection at it.
+alert_fpr: 0.01
+
 # Models scored by run-benchmark.sh. Name seeds METHOD-sN so the contract
 # check averages them (for example jepa-s0, jepa-s1, jepa-s2).
 models: {}

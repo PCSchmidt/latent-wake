@@ -2,7 +2,7 @@
 
 **Project:** Latent Wake: JEPA surprise detection for maritime vessel tracks
 **Owner:** Chris Schmidt
-**Date:** 2026-11-07 (draft; approval pending)
+**Date:** 2026-11-07 (all decisions recorded; owner approval of the `data_contract` gate pending)
 **Framework:** Meridian (ml-research recipe)
 
 This document is the single source of truth for what this experiment is trying
@@ -140,37 +140,89 @@ The AUPRC column matters. Taking the max of two scores gives each normal
 window two chances to score high, which costs precision. By AUPRC, the fused
 detector barely beats Kalman on this run.
 
-[DECIDE: gate on AUROC, on AUPRC, or on both. If both, duplicate each
-criterion below with `metric: auprc` and its own margin.]
+**Metrics (owner decision, 2026-11-07): AUROC and AUPRC both gated, plus the
+operating point.** Margins follow the agent's recommendation, accepted by the
+owner. Where the synthetic run showed room, the margins require a real lead.
+For fused versus Kalman by AUPRC, the weak spot of max-fusion, the margin
+requires only no loss of precision.
+
+**Operating point.** Each method's alert threshold is set on validation
+windows so that 1% would alert (`alert_fpr` in `configs/eval.yaml`). At that
+threshold, two things are gated:
+- **Calibration holds:** the fused detector's false-alarm rate on the test
+  set's normal windows is at most 2%, twice the budget.
+- **Fusion does not cost detections:** averaged over all kinds, the fused
+  detector catches at least as many anomalies as Kalman alone.
+
+Time to detect is reported, not gated.
+
+On the synthetic run, both operating-point criteria would fail. The fused
+false-alarm rate was 2.7%, with a threshold estimated from only about 1,800
+validation windows. Detection was 0.526 for fused versus 0.530 for Kalman, at
+a higher false-alarm rate. These are gated anyway: an alerting system that
+cannot hold its alarm budget is not deployable, and real data will settle
+whether this result holds.
 
 ```yaml contract-thresholds
 criteria:
-  - id: behavioral_gain_over_kalman
+  # Ranking quality: AUROC
+  - id: behavioral_gain_over_kalman_auroc
     metric: auroc
     method: jepa
     kinds: [loitering, route_deviation]
     vs_method: kalman
-    margin: null        # [DECIDE: required lead over Kalman, for example 0.10]
-  - id: fused_beats_kalman
+    margin: 0.10
+  - id: fused_beats_kalman_auroc
     metric: auroc
     method: fused
     kinds: [position_spoof, teleport, ais_gap, loitering, route_deviation]
     vs_method: kalman
-    margin: null        # [DECIDE: required lead over Kalman alone, for example 0.03]
-  - id: fused_beats_jepa
+    margin: 0.03
+  - id: fused_beats_jepa_auroc
     metric: auroc
     method: fused
     kinds: [position_spoof, teleport, ais_gap, loitering, route_deviation]
     vs_method: jepa
-    margin: null        # [DECIDE: required lead over the JEPA alone, for example 0.03]
+    margin: 0.03
+  # Precision under rarity: AUPRC
+  - id: behavioral_gain_over_kalman_auprc
+    metric: auprc
+    method: jepa
+    kinds: [loitering, route_deviation]
+    vs_method: kalman
+    margin: 0.05
+  - id: fused_no_precision_loss_vs_kalman_auprc
+    metric: auprc
+    method: fused
+    kinds: [position_spoof, teleport, ais_gap, loitering, route_deviation]
+    vs_method: kalman
+    margin: 0.0
+  - id: fused_beats_jepa_auprc
+    metric: auprc
+    method: fused
+    kinds: [position_spoof, teleport, ais_gap, loitering, route_deviation]
+    vs_method: jepa
+    margin: 0.03
+  # Operating point: thresholds from validation at a 1% alert budget
+  - id: fused_false_alarms_within_2x_budget
+    metric: fpr_at_budget
+    method: fused
+    kinds: [normal]
+    op: "<="
+    value: 0.02
+  - id: fused_detects_at_least_kalman_at_budget
+    metric: detect_at_budget
+    method: fused
+    kinds: [position_spoof, teleport, ais_gap, loitering, route_deviation]
+    vs_method: kalman
+    margin: 0.0
 ```
 
 **Reported, not gated:**
 - JEPA versus Kalman on kinematic kinds (parity). The fused detector covers these.
 - JEPA versus the raw-target ablation (does latent space help?), and the raw
   target fused with Kalman as a comparison point for the fused detector.
-- Operating-point metrics: false alarms per 1,000 vessel-hours and time to
-  detect. [DECIDE: keep them ungated, or add a criterion.]
+- Time to detect, and detection at a stricter 0.1% budget.
 
 ---
 
@@ -205,7 +257,14 @@ Human-approved decisions about the approach (not to be overridden by the agent):
 - **Seeds:** 3 per configuration; report mean and spread.
 - **Rejected approaches:** Pixel or map rendering of tracks; supervised
   training on injected anomalies (it would learn the injector, not normal traffic).
-- [DECIDE: confirm these constraints, or edit them.]
+- **Model selection and architecture changes** (pooling, chunk length,
+  SIGReg weight) use only validation data: validation loss, plus a separate
+  validation anomaly set built from the val split with its own seed. The test
+  set is scored once per final configuration. A rerun is allowed only to fix a
+  bug, and is logged in DECISIONS.md with the reason.
+- The fusion rule and contract thresholds are fixed at approval. Changing
+  them later requires amending this contract and re-approving the gate.
+- Constraints confirmed by the owner, 2026-11-07, on the agent's recommendation.
 
 ---
 

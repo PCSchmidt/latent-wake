@@ -28,6 +28,7 @@ import pandas as pd
 import yaml
 
 BLOCK = 2
+METRICS = {"auroc", "auprc", "detect_at_budget", "fpr_at_budget"}
 OPEN_DECISION = re.compile(r"\[DECIDE[^\]]*\]")
 THRESHOLD_BLOCK = re.compile(r"```yaml\s+contract-thresholds\s*\n(.*?)```", re.S)
 
@@ -65,7 +66,10 @@ def check_contract(contract: Path) -> None:
     _ok("no open [DECIDE] markers")
     for c in load_thresholds(contract):
         cid = c.get("id", "?")
-        _need(c.get("metric") in ("auroc", "auprc"), f"criterion {cid}: metric must be auroc or auprc")
+        _need(c.get("metric") in METRICS, f"criterion {cid}: metric must be one of {sorted(METRICS)}")
+        _need(c.get("op", ">=") in (">=", "<="), f"criterion {cid}: op must be >= or <=")
+        _need(c.get("op", ">=") == ">=" or c.get("value") is not None,
+              f"criterion {cid}: op <= needs an absolute value")
         _need(c.get("method"), f"criterion {cid}: method is required")
         _need(isinstance(c.get("kinds"), list) and c["kinds"], f"criterion {cid}: kinds must be a non-empty list")
         has_abs = c.get("value") is not None
@@ -218,7 +222,7 @@ def run_benchmark(cfg_path: Path) -> None:
     check_freeze_order(cfg)
     out = Path(cfg["out"])
     evaluate(Path(cfg["testset"]), Path(cfg["processed"]), {k: Path(v) for k, v in cfg["models"].items()}, out,
-             cfg.get("fuse_with_kalman"))
+             cfg.get("fuse_with_kalman"), float(cfg.get("alert_fpr", 0.01)))
     _ok(f"results written to {out}")
 
 
@@ -248,8 +252,9 @@ def evaluate_criteria(results: pd.DataFrame, criteria: list[dict]) -> list[dict]
             passed = got - ref >= float(c["margin"])
             detail = f"{c['method']} {got:.3f} vs {c['vs_method']} {ref:.3f} (margin {float(c['margin']):+.3f})"
         else:
-            passed = got >= float(c["value"])
-            detail = f"{c['method']} {got:.3f} (needs >= {float(c['value']):.3f})"
+            op, val = c.get("op", ">="), float(c["value"])
+            passed = got >= val if op == ">=" else got <= val
+            detail = f"{c['method']} {got:.4f} (needs {op} {val:.4f})"
         out.append({"id": c.get("id", "?"), "passed": bool(passed), "detail": detail})
     return out
 

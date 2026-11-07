@@ -15,6 +15,13 @@ Rules baked in:
   * AUPRC is reported next to AUROC: anomalies are rare in practice and AUROC
     alone flatters.
 
+Operating point: each method's alert threshold is set on validation windows
+(no injected anomalies) so that a fraction alert_fpr of them would alert
+(default 1%). At that threshold the results report, per method, the false-alarm
+rate on the test set's normal windows (a row with kind "normal",
+fpr_at_budget) and, per anomaly cell, the share detected (detect_at_budget).
+Thresholds never see the test set.
+
 Writes results.csv (long format), summary.md (AUROC table per cell), and
 scores.npz (window scores per method, for plots).
 """
@@ -36,8 +43,15 @@ from latentwake.models.baselines import kalman_nis, physics_residual, window_sco
 from latentwake.score import Calibrator
 
 
-def cell_metrics(cells: pd.DataFrame, scores: dict[str, np.ndarray]) -> pd.DataFrame:
-    """One row per (method, kind, level) with AUROC and AUPRC against the right normals."""
+def cell_metrics(
+    cells: pd.DataFrame, scores: dict[str, np.ndarray], thresholds: dict[str, float] | None = None
+) -> pd.DataFrame:
+    """One row per (method, kind, level) with AUROC and AUPRC against the right normals.
+
+    With thresholds, adds detect_at_budget per cell and one row per method with
+    kind "normal" holding the test false-alarm rate (fpr_at_budget).
+    """
+    thresholds = thresholds or {}
     normal = cells.kind.to_numpy() == "normal"
     moving_normal = normal & (cells.source_mean_sog.to_numpy() >= MOVING_SOG_KN)
     rows = []
@@ -59,15 +73,25 @@ def cell_metrics(cells: pd.DataFrame, scores: dict[str, np.ndarray]) -> pd.DataF
                     "n_normal": len(idx_n),
                     "auroc": roc_auc_score(y, sc),
                     "auprc": average_precision_score(y, sc),
+                    "detect_at_budget": float(np.mean(s[idx_a] > thresholds[method])) if method in thresholds else np.nan,
                 }
             )
+    for method, thr in thresholds.items():
+        rows.append(
+            {
+                "method": method, "kind": "normal", "level": -1, "params": "{}",
+                "n_anomalous": 0, "n_normal": int(normal.sum()),
+                "fpr_at_budget": float(np.mean(scores[method][normal] > thr)),
+            }
+        )
     return pd.DataFrame(rows)
 
 
-def baseline_scores(ts: TestSet) -> dict[str, np.ndarray]:
+def baseline_scores(X: np.ndarray) -> dict[str, np.ndarray]:
+    """Window scores of the non-learned baselines for unnormalized windows X."""
     return {
-        "physics": window_score(physics_residual(ts.X)),
-        "kalman": window_score(kalman_nis(ts.X)),
+        "physics": window_score(physics_residual(X)),
+        "kalman": window_score(kalman_nis(X)),
     }
 
 
@@ -78,9 +102,13 @@ def _window_z(val_scores, val_vclass, test_scores, test_vclass) -> np.ndarray:
 
 
 def model_scores(
-    name_to_ckpt: dict[str, Path], ts: TestSet, processed: Path, fuse_with_kalman: str | None = None
-) -> dict[str, np.ndarray]:
-    """Calibrated window scores for each model, plus fused detectors if requested.
+    name_to_ckpt: dict[str, Path],
+    ts: TestSet,
+    processed: Path,
+    fuse_with_kalman: str | None = None,
+    kalman_val: np.ndarray | None = None,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """Calibrated window scores for each model (test, val), plus fused detectors if requested.
 
     Fusion rule (fixed before any real data; nothing in it is fit to a test set):
     calibrate each detector's *window* score per vessel class on validation
@@ -102,47 +130,75 @@ def model_scores(
     Xv, meta_v = load_split(processed, "val")
     vclass_val = meta_v.vessel_class.to_numpy()
 
-    kalman_z = None
+    kz_test = kz_val = None
     if fuse_with_kalman:
-        Xv_raw, _ = load_split(processed, "val", normalized=False)
-        kalman_z = _window_z(window_score(kalman_nis(Xv_raw)), vclass_val, window_score(kalman_nis(ts.X)), vclass_test)
+        if kalman_val is None:
+            kalman_val = window_score(kalman_nis(load_split(processed, "val", normalized=False)[0]))
+        kalman_test = window_score(kalman_nis(ts.X))
+        kz_test = _window_z(kalman_val, vclass_val, kalman_test, vclass_test)
+        kz_val = _window_z(kalman_val, vclass_val, kalman_val, vclass_val)
 
-    out = {}
+    test, val = {}, {}
     for name, ckpt in name_to_ckpt.items():
         model = load_model(Path(ckpt), device=device)
         e_val = transition_errors(model, Xv, vclass_val)
         e_test = transition_errors(model, Xn, vclass_test)
         cal = Calibrator.fit(e_val, vclass_val)
-        out[name] = cal.transform(e_test, vclass_test).max(axis=1)
-        if kalman_z is not None and (name == fuse_with_kalman or name.startswith(fuse_with_kalman + "-s")):
-            val_w = cal.transform(e_val, vclass_val).max(axis=1)
-            model_z = _window_z(val_w, vclass_val, out[name], vclass_test)
-            out["fused" + name[len(fuse_with_kalman):]] = np.maximum(model_z, kalman_z)
-    if fuse_with_kalman and not any(k.startswith("fused") for k in out):
+        test[name] = cal.transform(e_test, vclass_test).max(axis=1)
+        val[name] = cal.transform(e_val, vclass_val).max(axis=1)
+        if kz_test is not None and (name == fuse_with_kalman or name.startswith(fuse_with_kalman + "-s")):
+            fused = "fused" + name[len(fuse_with_kalman):]
+            test[fused] = np.maximum(_window_z(val[name], vclass_val, test[name], vclass_test), kz_test)
+            val[fused] = np.maximum(_window_z(val[name], vclass_val, val[name], vclass_val), kz_val)
+    if fuse_with_kalman and not any(k.startswith("fused") for k in test):
         raise ValueError(f"fuse_with_kalman={fuse_with_kalman!r} matched no model name")
-    return out
+    return test, val
+
+
+def alert_thresholds(val_scores: dict[str, np.ndarray], alert_fpr: float) -> dict[str, float]:
+    """Per-method threshold at which a fraction alert_fpr of validation windows would alert."""
+    return {m: float(np.quantile(v, 1.0 - alert_fpr)) for m, v in val_scores.items()}
 
 
 def summarize(results: pd.DataFrame) -> str:
     """Markdown: AUROC per cell (rows) by method (columns), then a per-kind mean."""
-    piv = results.pivot_table(index=["kind", "level", "params"], columns="method", values="auroc").round(3)
-    kind = results.groupby(["kind", "method"]).auroc.mean().unstack().round(3)
-    return (
+    anom = results[results.kind != "normal"]
+    piv = anom.pivot_table(index=["kind", "level", "params"], columns="method", values="auroc").round(3)
+    kind = anom.groupby(["kind", "method"]).auroc.mean().unstack().round(3)
+    text = (
         "## AUROC by kind (mean over severity levels)\n\n" + kind.to_markdown()
         + "\n\n## AUROC by cell\n\n" + piv.reset_index().drop(columns="params").to_markdown(index=False)
         + "\n"
     )
+    if "detect_at_budget" in anom and anom.detect_at_budget.notna().any():
+        det = anom.groupby(["kind", "method"]).detect_at_budget.mean().unstack().round(3)
+        fpr = results[results.kind == "normal"].set_index("method").fpr_at_budget.round(4)
+        text += (
+            "\n## Operating point (threshold from validation)\n\n"
+            + "Test false-alarm rate:\n\n" + fpr.to_frame().T.to_markdown(index=False)
+            + "\n\nShare detected, by kind (mean over severity levels):\n\n" + det.to_markdown() + "\n"
+        )
+    return text
 
 
 def run(
-    testset: Path, processed: Path, models: dict[str, Path], out: Path, fuse_with_kalman: str | None = None
+    testset: Path,
+    processed: Path,
+    models: dict[str, Path],
+    out: Path,
+    fuse_with_kalman: str | None = None,
+    alert_fpr: float = 0.01,
 ) -> pd.DataFrame:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     ts = load_test_set(testset)
-    scores = baseline_scores(ts)
-    scores.update(model_scores(models, ts, processed, fuse_with_kalman) if models else {})
-    results = cell_metrics(ts.cells, scores)
+    scores = baseline_scores(ts.X)
+    val_scores = baseline_scores(load_split(processed, "val", normalized=False)[0])
+    if models:
+        t, v = model_scores(models, ts, processed, fuse_with_kalman, kalman_val=val_scores["kalman"])
+        scores.update(t)
+        val_scores.update(v)
+    results = cell_metrics(ts.cells, scores, alert_thresholds(val_scores, alert_fpr))
     results.to_csv(out / "results.csv", index=False)
     (out / "summary.md").write_text(summarize(results))
     np.savez_compressed(out / "scores.npz", **scores)
@@ -157,9 +213,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--model", action="append", default=[], help="NAME=CHECKPOINT; repeatable")
     p.add_argument("--fuse-with-kalman", default=None, metavar="PREFIX",
                    help="also score max(model z, Kalman z) for models named PREFIX or PREFIX-sN")
+    p.add_argument("--alert-fpr", type=float, default=0.01, help="validation false-alarm budget for thresholds")
     a = p.parse_args(argv)
     models = dict(m.split("=", 1) for m in a.model)
-    run(a.testset, a.processed, {k: Path(v) for k, v in models.items()}, a.out, a.fuse_with_kalman)
+    run(a.testset, a.processed, {k: Path(v) for k, v in models.items()}, a.out, a.fuse_with_kalman, a.alert_fpr)
     print((a.out / "summary.md").read_text())
 
 

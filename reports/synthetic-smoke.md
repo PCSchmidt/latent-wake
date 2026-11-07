@@ -96,6 +96,23 @@ normal window two chances to score high, which costs precision. Whether the
 contract gates on AUROC, AUPRC, or both is an owner decision. The raw-target
 model fused with Kalman is a natural comparison point for the real runs.
 
+## Operating point (1% validation alert budget)
+
+| method | test false-alarm rate | share detected, all kinds |
+|:--|--:|--:|
+| kalman | 1.1% | 0.530 |
+| fused | 2.7% | 0.526 |
+| jepa | 3.3% | 0.286 |
+
+At a fixed alert budget, fusion does not add detections on this run. It
+spends part of the budget on the JEPA and loses some kinematic detections
+(spoofs 0.86 versus Kalman's 0.98) for its gains on loitering (0.38 versus
+0.07). False-alarm rates overshoot the budget, partly because the threshold
+rests on about 18 validation windows. Real data will have far more.
+
+Against the final contract, this run passes 6 of 8 criteria and fails both
+operating-point criteria.
+
 ## What this means for DATA_CONTRACT.md
 
 A "JEPA beats Kalman on every kind" criterion would fail on this evidence, and
