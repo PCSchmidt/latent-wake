@@ -16,6 +16,7 @@ dependencies = [
   "hydra-core",
   "scikit-learn",
   "zstandard",
+  "tabulate",
 ]
 
 [project.optional-dependencies]

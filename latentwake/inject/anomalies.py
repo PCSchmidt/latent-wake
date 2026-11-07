@@ -138,7 +138,9 @@ def route_deviation(raw, rng, turn_deg: float, speed_factor: float | None = None
     return _finish("route_deviation", raw, nx, ny, lat0, lon0, label, params, sog=sog, cog=cog, heading=heading)
 
 
-def loitering(raw, rng, duration_steps: int, speed_kn: float | None = None, radius_m: float | None = None) -> Injection:
+def loitering(
+    raw, rng, duration_steps: int, speed_kn: float | None = None, radius_m: float | None = None, ramp_steps: int = 4
+) -> Injection:
     """Replace a stretch of normal transit with slow circling, then resume the original motion."""
     L = len(raw["lat"])
     d = int(min(duration_steps, L - L // 4))
@@ -155,11 +157,18 @@ def loitering(raw, rng, duration_steps: int, speed_kn: float | None = None, radi
     dtheta = step_m / radius_m * float(rng.choice([-1.0, 1.0]))  # radians of arc per step
     c0 = np.radians(cog[s - 1]) if np.isfinite(cog[s - 1]) else 0.0
     e = s + d
+    # Blend from the original motion into the circle and back out over
+    # ramp_steps, so the ship slows and turns like a ship. An instant switch
+    # from transit speed to circling is an artifact a constant-velocity
+    # Kalman filter catches trivially (0.95 AUROC on synthetic data).
     for i in range(s, e):
         course = c0 + dtheta * (i - s + 1)
-        dx[i], dy[i] = step_m * np.sin(course), step_m * np.cos(course)
-        sog[i] = speed_kn
-        cog[i] = np.mod(np.degrees(course), 360.0)
+        lx, ly = step_m * np.sin(course), step_m * np.cos(course)
+        w = min(1.0, (i - s + 1) / ramp_steps, (e - i) / ramp_steps)
+        dx[i] = (1 - w) * dx[i] + w * lx
+        dy[i] = (1 - w) * dy[i] + w * ly
+        sog[i] = np.hypot(dx[i], dy[i]) / (KNOTS_TO_MPS * STEP_S)
+        cog[i] = np.mod(np.degrees(np.arctan2(dx[i], dy[i])), 360.0)
         if np.isfinite(heading[i]):
             heading[i] = cog[i]
     nx, ny = np.cumsum(dx), np.cumsum(dy)

@@ -6,7 +6,7 @@ Latent Wake trains a small Joint-Embedding Predictive Architecture (JEPA) world 
 
 The model follows the [LeWorldModel](https://arxiv.org/abs/2603.19312) recipe (a next-latent prediction loss plus the SIGReg Gaussian regularizer, with no EMA, stop-gradient, or pretrained encoder), ported from pixels to trajectories. It is sized to train on a single laptop GPU (RTX A4500, 16 GB).
 
-> **Status:** Week 1 of a 12-week build. The download, preprocessing, and anomaly-injection stages are written and tested on synthetic traffic; the first run on real NOAA data is next. The full scope is in [`docs/SCOPE.md`](docs/SCOPE.md).
+> **Status:** Week 1 of a 12-week build. The full pipeline (download, preprocessing, anomaly injection, model, baselines, training, and evaluation) is written and tested end to end on synthetic traffic. The first run on real NOAA data is next. The full scope is in [`docs/SCOPE.md`](docs/SCOPE.md).
 
 ## Why
 
@@ -128,6 +128,26 @@ The first three are kinematically *inconsistent* (positions contradict reported 
 
 **Evaluation rule:** score `route_deviation` and `loitering` only against normal windows from moving vessels (`source_mean_sog >= 3`). Those anomalies are injected only into moving ships, and anchored ships are trivially "normal," so comparing against all normals rewards detecting motion, not anomalies. On synthetic data, a plain physics-consistency check scores about 0.73 AUROC on them unmatched and 0.48 matched.
 
+### Step 4: train
+
+```bash
+python -m latentwake.train --processed data/processed/chesapeake --out runs/jepa-s0 --seed 0
+```
+
+Defaults follow LeWorldModel: SIGReg weight 0.09 with 17 knots and 1,024 projections, AdamW, gradient clip 1.0, no EMA or stop-gradient. Learning rate 3e-4 with warmup and cosine decay, batch 256, 30 epochs, bf16 on CUDA. Anchored and moored windows are kept at 25% (`--stationary-keep`) so they don't dominate training.
+
+Each epoch logs training and validation prediction loss, SIGReg, and `val_erank`, the effective rank of validation latents. A healthy run stays well above 1. A slide toward 1 means collapse, and the log flags it. Ablations are flags: `--target raw` (no encoder, no SIGReg), `--no-action`, `--sigreg-weight 0`. `--size small` is a 0.8M-parameter version for CPU debugging; the full model is 10.1M.
+
+### Step 5: evaluate
+
+```bash
+python -m latentwake.evaluate --testset data/testsets/chesapeake-test-v1 \
+    --processed data/processed/chesapeake --out reports/eval-v1 \
+    --model jepa=runs/jepa-s0/best.pt --model raw=runs/raw-s0/best.pt
+```
+
+Always includes two non-learned baselines: a physics residual (observed motion versus reported speed and course) and a constant-velocity Kalman filter that observes position and reported velocity and scores each step by normalized innovation squared. Learned models are calibrated per vessel class on the validation split (median and MAD), so a fishing boat's normal jitter isn't scored like a tanker's. Writes AUROC and AUPRC per anomaly cell to `results.csv` and `summary.md`.
+
 ### Working offline with synthetic traffic
 
 ```bash
@@ -144,7 +164,7 @@ python -m latentwake.data.preprocess --interim data/interim/synthetic --out data
 
 ## Acknowledgments
 
-The training recipe builds on [LeWorldModel](https://github.com/lucas-maes/le-wm) by Maes, Le Lidec, Scieur, LeCun, and Balestriero. SIGReg code will be adapted from that repository with attribution.
+The training recipe builds on [LeWorldModel](https://github.com/lucas-maes/le-wm) by Maes, Le Lidec, Scieur, LeCun, and Balestriero. SIGReg and the AdaLN-zero transformer blocks in `latentwake/models/blocks.py` are adapted from that repository (MIT License, copyright 2026 Lucas Maes).
 
 ## License
 

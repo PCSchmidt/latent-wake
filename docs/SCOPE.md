@@ -73,13 +73,13 @@ The same prediction error is the training loss and, at inference, the surprise s
 
 | Part | Design | Approx. params |
 | --- | --- | --- |
-| Chunk encoder | Linear embed per step, 4-layer transformer, width 192, mean-pool to a 192-dim latent | ~1.8M |
-| Projector | Linear plus BatchNorm1d (LeWM uses BatchNorm, not LayerNorm, so SIGReg gradients flow) | <0.1M |
-| Action encoder | MLP from next-chunk SOG, COG, heading to a conditioning vector | <0.1M |
-| Predictor | 6-layer causal transformer, width 256, AdaLN-zero action conditioning, predicts the next latent | ~4.7M |
-| Total | | ~7M |
+| Chunk encoder | Linear embed per step plus vessel-class embedding, 4-layer transformer, width 192, mean-pool, then projector | 2.2M |
+| Projector | MLP with BatchNorm1d (LeWM uses BatchNorm, not LayerNorm, so SIGReg gradients flow); counted in the encoder | (incl.) |
+| Action encoder | MLP from next-chunk SOG, COG, heading change to a conditioning vector; counted in the predictor | (incl.) |
+| Predictor | 6-layer causal transformer, width 256, AdaLN-zero action conditioning, output MLP; predicts the next latent | 7.9M |
+| Total | | 10.1M |
 
-Parameter counts are estimates from the layer sizes; confirm them in the first training run.
+Parameter counts are measured from the implementation. The AdaLN-zero modulation layers (about 2.4M) are why the predictor came in above the original 4.7M estimate.
 
 **Loss.** Next-latent prediction plus the Sketched Isotropic Gaussian Regularizer. SIGReg projects the batch of latents onto random unit directions and penalizes the Epps-Pulley distance from a standard normal along each one. That keeps latents spread out and blocks collapse.
 
@@ -89,7 +89,7 @@ Parameter counts are estimates from the layer sizes; confirm them in the first t
 
 The only loss hyperparameter is the SIGReg weight. Tune it by bisection on validation prediction loss, checking that latent effective rank stays high.
 
-**Fit on the laptop.** About 7M parameters, a batch of 512 windows, and mixed precision use well under 4 GB of the A4500's 16 GB. Training on three months of one region should take hours, not days; measure this in week 4 rather than trusting the estimate.
+**Fit on the laptop.** About 10M parameters, a batch of 512 windows, and mixed precision use well under 4 GB of the A4500's 16 GB. Training on three months of one region should take hours, not days; measure this in week 4 rather than trusting the estimate.
 
 ## Anomaly scoring and synthetic anomalies
 
