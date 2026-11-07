@@ -6,7 +6,7 @@ Latent Wake trains a small Joint-Embedding Predictive Architecture (JEPA) world 
 
 The model follows the [LeWorldModel](https://arxiv.org/abs/2603.19312) recipe (a next-latent prediction loss plus the SIGReg Gaussian regularizer, with no EMA, stop-gradient, or pretrained encoder), ported from pixels to trajectories. It is sized to train on a single laptop GPU (RTX A4500, 16 GB).
 
-> **Status:** Planning. Week 0 of a 12-week build. The full scope is in [`docs/SCOPE.md`](docs/SCOPE.md).
+> **Status:** Week 1 of a 12-week build. The download, preprocessing, and anomaly-injection stages are written and tested on synthetic traffic; the first run on real NOAA data is next. The full scope is in [`docs/SCOPE.md`](docs/SCOPE.md).
 
 ## Why
 
@@ -96,6 +96,46 @@ This streams each NOAA national daily file (`ais-YYYY-MM-DD.csv.zst`), crops it 
 Useful flags: `--workers 2` (days in parallel), `--keep-raw` (keep national files, which are large), `--memory-limit 4GB` (DuckDB memory per worker). Try a single day first (`--start 2025-04-01 --end 2025-04-01`) and check the manifest's `missing_optional` field to confirm the schema matched.
 
 The box in `latentwake/data/regions.py` is a loose first pass. Plot the first day's points and tighten it if needed. Only 2025-and-later daily files are supported so far.
+
+### Step 2: clean, resample, and window
+
+```bash
+python -m latentwake.data.preprocess --interim data/interim/chesapeake --out data/processed/chesapeake
+```
+
+Drops bad identities, NOAA "not available" sentinels, duplicates, and single-report position glitches; splits each vessel into tracks at silences over 30 minutes (logged to `gaps.parquet`); resamples to a shared 2-minute grid, marking any step that would need more than 3 missing steps of interpolation as invalid; computes per-step relative-motion features; and cuts 64-step windows (about 2 hours) with stride 16 over fully valid stretches only.
+
+Splits are by time *and* vessel: training uses 70% of vessels before the cutoff (two-thirds through the data by default); validation and test use the other 30% after it. No vessel or time period appears on both sides. Feature statistics come from the training split only. `stats.json` records row counts at every stage.
+
+### Step 3: build and freeze a test set
+
+```bash
+python -m latentwake.inject.build --processed data/processed/chesapeake --split test \
+    --out data/testsets/chesapeake-test-v1
+```
+
+Injects seeded anomalies into copies of held-out windows, one cell per kind and severity level, alongside untouched normal windows. The output carries a SHA-256 checksum: loading verifies it, and saving refuses to overwrite, so the test set is fixed before any model sees it.
+
+| Kind | What changes | Severity knob |
+| --- | --- | --- |
+| `position_spoof` | Positions shift; reported speed and course do not | Offset, 0.1 to 5 nmi |
+| `teleport` | One report jumps, then returns | Distance, 0.1 to 5 nmi |
+| `ais_gap` | Vessel goes dark, reports go stale, reappears displaced | Gap length × jump distance |
+| `route_deviation` | Vessel turns off its route, reports stay consistent | Turn, 5° to 90° |
+| `loitering` | Transit replaced by slow circling, reports stay consistent | Duration, 16 to 64 min |
+
+The first three are kinematically *inconsistent* (positions contradict reported motion). The last two are *consistent* (only the behavior is unusual), which tests whether a model learned normal behavior rather than just physics.
+
+**Evaluation rule:** score `route_deviation` and `loitering` only against normal windows from moving vessels (`source_mean_sog >= 3`). Those anomalies are injected only into moving ships, and anchored ships are trivially "normal," so comparing against all normals rewards detecting motion, not anomalies. On synthetic data, a plain physics-consistency check scores about 0.73 AUROC on them unmatched and 0.48 matched.
+
+### Working offline with synthetic traffic
+
+```bash
+python -m latentwake.data.synthetic --days 9 --vessels 50 --out data/interim/synthetic
+python -m latentwake.data.preprocess --interim data/interim/synthetic --out data/processed/synthetic
+```
+
+`latentwake.data.synthetic` writes days in exactly the download step's format: simple ship kinematics (transits, tugs, ferries, fishing boats, anchored ships) with realistic reporting flaws. It has no coastline and is not a model of the real bay. It exists for tests and for building the model before real data arrives.
 
 ## Related projects
 

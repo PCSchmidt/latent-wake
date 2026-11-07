@@ -136,6 +136,7 @@ The headline comparison is latent prediction versus raw-feature prediction with 
 - False alarms per 1,000 vessel-hours at the calibrated threshold, the number an operator cares about.
 - Time to detect: chunks between anomaly onset and first alert.
 - On the equation-grounded benchmark, use its timestamp-level protocol so numbers compare directly with the published results.
+- Score behavioral anomalies (route deviation, loitering) only against normal windows from moving vessels. They are injected only into moving ships, so comparing against all normals, a third or more of which are anchored, rewards detecting motion rather than anomalies. A physics-consistency check on synthetic data scores 0.73 AUROC unmatched and 0.48 matched.
 
 **Ablations**
 

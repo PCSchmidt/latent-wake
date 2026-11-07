@@ -12,13 +12,14 @@ dependencies = [
   "polars",
   "duckdb>=1.1",
   "pyarrow",
+  "pandas>=2.0",
   "hydra-core",
   "scikit-learn",
   "zstandard",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "jupyter", "matplotlib", "pandas"]
+dev = ["pytest", "ruff", "jupyter", "matplotlib"]
 tracking = ["wandb"]
 
 [build-system]
