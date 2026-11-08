@@ -1,0 +1,133 @@
+# Meridian gate DAG for Latent Wake
+# Adapted from Meridian's ml-research recipe to the project's 12-week plan
+# (docs/SCOPE.md). Project-specific checks live in scripts/ (validate-*.sh,
+# run-*.sh) and call latentwake/checks.py; paths come from configs/eval.yaml.
+#
+#   data_contract -> pipeline_validated -> training_stable -> model_eval -> ablation_study -> demo_shipped
+#   (you approve)    (weeks 1-3, auto)     (weeks 4-6, auto)  (you approve)  (you approve)     (you approve)
+#
+# Changes from the recipe: added training_stable (the scope's "trains without
+# collapse across 3 seeds" gate); ablations are required, not optional, since
+# they carry the project's argument; evidence_pdf dropped in favor of the
+# write-up; deploy_ready became demo_shipped (a static Darkwater panel, not a
+# served API). Post-hooks the recipe named but Meridian does not ship
+# (emit-telemetry, save-best-model, export-model) are removed.
+
+version: "1.0"
+
+project:
+  name: "latent-wake"
+  recipe: "ml-research"
+  description: "JEPA surprise detection for maritime vessel tracks"
+
+gates:
+  # Gate 1: the human locks metrics, thresholds, and baselines before any
+  # model sees real data.
+  - id: data_contract
+    label: "Data Contract Approved"
+    type: human_approval
+    required: true
+    approval_token: "DATA CONTRACT APPROVED"
+    requires: []
+    requires_artifacts:
+      - DATA_CONTRACT.md
+      - DECISIONS.md
+    hooks:
+      pre:
+        - validate-data-contract.sh   # no [DECIDE] markers; thresholds complete
+      post:
+        - write-reflexion.sh
+    emits: DATA_CONTRACT_GATE.json
+    on_fail: block_all_writes
+
+  # Gate 2 (weeks 1-3): real data through the pipeline, splits clean, and the
+  # test set frozen before any model run.
+  - id: pipeline_validated
+    label: "Pipeline Validated, Test Set Frozen"
+    type: automated
+    required: true
+    requires:
+      - data_contract
+    hooks:
+      pre:
+        - run-pipeline-tests.sh       # unit tests: download, preprocess, inject
+        - validate-schema.sh          # real cropped days present, none failed
+        - validate-preprocessing.sh   # outputs present, enough windows, finite
+        - validate-splits.sh          # no vessel or period on both sides
+        - validate-testset.sh         # checksum verifies; test split only
+      post:
+        - write-reflexion.sh
+    pass_condition: "exit_code == 0"
+    emits: PIPELINE_GATE.json
+    on_fail: block_write
+
+  # Gate 3 (weeks 4-6): the JEPA trains without collapse on three seeds.
+  - id: training_stable
+    label: "Training Stable Across Seeds"
+    type: automated
+    required: true
+    requires:
+      - pipeline_validated
+    hooks:
+      pre:
+        - validate-training.sh        # >= 3 seeds per latent model; no collapse
+      post:
+        - write-reflexion.sh
+    pass_condition: "exit_code == 0"
+    emits: TRAINING_GATE.json
+    on_fail: block_write
+
+  # Gate 4 (weeks 7-9): results against the contract, reviewed by the human.
+  - id: model_eval
+    label: "Model Evaluation Approved"
+    type: human_approval
+    required: true
+    approval_token: "EVAL APPROVED"
+    requires:
+      - training_stable
+    requires_artifacts:
+      - EVAL_RESULTS.md
+      - MODEL_CARD.md
+    hooks:
+      pre:
+        - run-benchmark.sh            # models trained after the freeze; score all
+        - validate-metrics.sh         # every contract criterion met
+      post:
+        - write-reflexion.sh
+    emits: MODEL_EVAL_GATE.json
+    on_fail: block_all_writes
+
+  # Gate 5 (weeks 7-9): the ablations that explain the result.
+  - id: ablation_study
+    label: "Ablation Study Approved"
+    type: human_approval
+    required: true
+    approval_token: "ABLATION DONE"
+    requires:
+      - model_eval
+    requires_artifacts:
+      - ABLATION_RESULTS.md
+    hooks:
+      post:
+        - write-reflexion.sh
+    on_fail: block_write
+
+  # Gate 6 (weeks 10-12): demo panel, write-up, and repo ready to share.
+  - id: demo_shipped
+    label: "Demo and Write-up Shipped"
+    type: human_approval
+    required: true
+    approval_token: "SHIP"
+    requires:
+      - ablation_study
+    requires_artifacts:
+      - MODEL_CARD.md
+      - CHANGELOG.md
+      - docs/WRITEUP.md
+    hooks:
+      pre:
+        - run-all-tests.sh
+      post:
+        - write-reflexion.sh
+    emits: SHIPPED
+    on_fail: block_all_writes

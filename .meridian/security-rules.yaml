@@ -1,0 +1,100 @@
+# security-rules.yaml
+# Meridian configurable security blocklist (Gate 2.1)
+#
+# Read by .claude/hooks/block-dangerous.sh on PreToolUse. Each rule scans a
+# target for an extended-regex (ERE) pattern and applies a severity:
+#
+#   target:    command  -> the Bash tool's command string
+#              content  -> the text written by Edit/Write (new_string / content)
+#   severity:  block    -> exit 2, tool execution is prevented (deterministic risks)
+#              warn     -> logged, tool allowed (heuristic detections, may false-positive)
+#              off      -> rule disabled
+#
+# Format is intentionally regular (2-space indent, one `- id:` per rule) so it
+# parses with awk when `yq` is unavailable. Patterns are single-quoted YAML
+# scalars; to match a quote character inside one, use the class ["''] (a doubled
+# single quote is the YAML escape for one literal '). Add project-specific rules
+# by copying a block below.
+
+version: "1.0"
+
+rules:
+  # ---- Destructive commands (deterministic -> block) ----
+  - id: rm-rf-root
+    category: destructive
+    target: command
+    severity: block
+    pattern: 'rm[[:space:]]+(-[[:alpha:]]*r[[:alpha:]]*f|-[[:alpha:]]*f[[:alpha:]]*r|-r[[:space:]]+-f|-f[[:space:]]+-r)[[:space:]]+(/|/\*|~|\$HOME|\.)([[:space:]]|$)'
+    message: "Recursive force-delete targeting a root/home/cwd path"
+
+  - id: disk-overwrite
+    category: destructive
+    target: command
+    severity: block
+    pattern: '(^|[[:space:];&|])(dd[[:space:]]+if=|mkfs(\.[a-z0-9]+)?[[:space:]]|>[[:space:]]*/dev/(sd|nvme|hd)[a-z])'
+    message: "Raw disk write / filesystem format (dd, mkfs, redirect to block device)"
+
+  - id: fork-bomb
+    category: destructive
+    target: command
+    severity: block
+    pattern: ':\(\)[[:space:]]*\{[[:space:]]*:[[:space:]]*\|[[:space:]]*:'
+    message: "Shell fork bomb"
+
+  - id: git-hard-reset
+    category: destructive
+    target: command
+    severity: warn
+    pattern: 'git[[:space:]]+reset[[:space:]]+--hard'
+    message: "git reset --hard discards uncommitted work"
+
+  - id: chmod-777-root
+    category: destructive
+    target: command
+    severity: warn
+    pattern: 'chmod[[:space:]]+(-R[[:space:]]+)?0?777[[:space:]]+/'
+    message: "World-writable permissions on a root path"
+
+  - id: curl-pipe-shell
+    category: destructive
+    target: command
+    severity: warn
+    pattern: '(curl|wget)[[:space:]].*\|[[:space:]]*(sudo[[:space:]]+)?(ba)?sh([[:space:]]|$)'
+    message: "Piping a remote download straight into a shell"
+
+  # ---- Hardcoded secrets (deterministic shapes -> block) ----
+  - id: aws-access-key
+    category: secret
+    target: content
+    severity: block
+    pattern: '(AKIA|ASIA)[0-9A-Z]{16}'
+    message: "Hardcoded AWS access key ID"
+
+  - id: private-key-block
+    category: secret
+    target: content
+    severity: block
+    pattern: '-----BEGIN[[:space:]]+([A-Z]+[[:space:]]+)?PRIVATE[[:space:]]+KEY-----'
+    message: "Hardcoded private key material"
+
+  - id: generic-api-secret
+    category: secret
+    target: content
+    severity: warn
+    pattern: '([Aa]pi[_-]?[Kk]ey|[Ss]ecret|[Tt]oken|[Pp]assword)[[:space:]]*[:=][[:space:]]*["''][^"'' ]{12,}["'']'
+    message: "Possible hardcoded secret/credential literal"
+
+  # ---- SQL injection (heuristic -> warn) ----
+  - id: sql-string-concat
+    category: sqli
+    target: content
+    severity: warn
+    pattern: '(SELECT|INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM|DROP[[:space:]]+TABLE)[^;]*["''][[:space:]]*\+[[:space:]]*[A-Za-z_]'
+    message: "SQL built by string concatenation with a variable (injection risk)"
+
+  - id: sql-fstring-format
+    category: sqli
+    target: content
+    severity: warn
+    pattern: '(execute|executemany|query|cursor\.execute)[[:space:]]*\([[:space:]]*(f["'']|["''][^)]*["''][[:space:]]*\.[[:space:]]*format)'
+    message: "SQL passed an f-string / .format() instead of a parameterized query"

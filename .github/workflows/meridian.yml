@@ -1,0 +1,31 @@
+# Meridian Verify — CI enforcement boundary
+# Installed by install.sh to .github/workflows/meridian.yml.
+#
+# This is how non-Claude-Code platforms (Cursor, Windsurf, Aider, etc.) get
+# mechanical enforcement: the same meridian-verify.sh that a Claude Code user
+# runs locally runs here on every push/PR, and a non-zero exit fails the check
+# and blocks the merge. See docs/platform-tiers.md.
+name: Meridian Verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq and yq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          jq --version
+          yq --version
+
+      - name: Meridian verify
+        run: bash scripts/meridian-verify.sh

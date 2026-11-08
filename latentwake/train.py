@@ -16,6 +16,7 @@ slide toward 1 means the encoder is collapsing.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import math
 import time
@@ -26,7 +27,7 @@ import numpy as np
 import torch
 
 from latentwake.data.preprocess import load_split
-from latentwake.models.jepa import LatentWake, ModelConfig, effective_rank
+from latentwake.models.jepa import LatentWake, ModelConfig, collapse_signal, effective_rank
 
 
 @dataclass
@@ -101,7 +102,8 @@ def train(cfg: TrainConfig, log=None) -> list[dict]:
     device = _device(cfg.device)
     out = Path(cfg.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config.json").write_text(json.dumps(asdict(cfg), indent=2))
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    (out / "config.json").write_text(json.dumps({**asdict(cfg), "started_at": started_at}, indent=2))
 
     X, meta = load_split(cfg.processed, "train")
     keep = _subsample_stationary(meta, cfg.stationary_keep, rng)
@@ -149,8 +151,10 @@ def train(cfg: TrainConfig, log=None) -> list[dict]:
         rec.update(_validate(model, Xv, Vv, cfg, device))
         rec["lr"] = _lr_at(step - 1, total, cfg)
         rec["seconds"] = round(time.perf_counter() - t0, 1)
-        if model.encoder is not None and rec["val_erank"] < 0.1 * cfg.model.embed_dim:
-            rec["warning"] = "latent effective rank below 10% of embed_dim: possible collapse"
+        if model.encoder is not None:
+            reason = collapse_signal([h["val_erank"] for h in history] + [rec["val_erank"]], cfg.model.embed_dim)
+            if reason:
+                rec["warning"] = f"possible collapse: {reason}"
         history.append(rec)
         with open(out / "metrics.jsonl", "a") as fh:
             fh.write(json.dumps(rec) + "\n")

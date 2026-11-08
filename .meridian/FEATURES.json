@@ -1,0 +1,98 @@
+[
+  {
+    "id": "data-pipeline",
+    "name": "Data Pipeline",
+    "source_section": "Data Pipeline",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  },
+  {
+    "id": "anomaly-test-sets",
+    "name": "Anomaly Test Sets",
+    "source_section": "Anomaly Test Sets",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  },
+  {
+    "id": "model-training",
+    "name": "Model Training",
+    "source_section": "Model Training",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  },
+  {
+    "id": "baselines",
+    "name": "Baselines",
+    "source_section": "Baselines",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  },
+  {
+    "id": "model-evaluation",
+    "name": "Model Evaluation",
+    "source_section": "Model Evaluation",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  },
+  {
+    "id": "ablation-study",
+    "name": "Ablation Study",
+    "source_section": "Ablation Study",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  },
+  {
+    "id": "darkwater-demo",
+    "name": "Darkwater Demo",
+    "source_section": "Darkwater Demo",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  },
+  {
+    "id": "write-up",
+    "name": "Write-up",
+    "source_section": "Write-up",
+    "lifecycle": {
+      "happy_path": false,
+      "integration": false,
+      "edge_cases": false,
+      "error_handling": false,
+      "hardening": false
+    }
+  }
+]
