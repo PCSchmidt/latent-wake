@@ -1,1 +1,11 @@
-{"passed_gates": []}
+{
+  "passed_gates": [
+    "data_contract"
+  ],
+  "approvals": {
+    "data_contract": {
+      "by": "Chris Schmidt",
+      "at": "2026-11-08T23:14:10Z"
+    }
+  }
+}
