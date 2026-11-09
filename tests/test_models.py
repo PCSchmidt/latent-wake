@@ -187,3 +187,26 @@ def test_window_z_and_fusion_are_scale_free():
             assert abs(np.median(z[vclass == c])) < 1e-9
     # Same calibrated scale regardless of the raw units.
     assert 0.5 < np.median(np.abs(z_big)) / np.median(np.abs(z_small)) < 2.0
+
+
+@pytest.mark.parametrize("pooling,chunk_len", [("attention", 8), ("mean", 4), ("attention", 4)])
+def test_pooling_and_chunk_variants(pooling, chunk_len):
+    m = LatentWake(tiny(pooling=pooling, chunk_len=chunk_len))
+    x, v = torch.randn(4, 64, len(FEATURES)), torch.randint(0, 10, (4,))
+    out = m(x, v)
+    n_chunks = 64 // chunk_len
+    assert out["per_step"].shape == (4, n_chunks - 1)
+    assert m.actions(x).shape == (4, n_chunks - 1, chunk_len * len(ACTION_IDX))
+    out["loss"].backward()
+
+
+def test_attention_pooling_can_focus_on_one_step():
+    m = LatentWake(tiny(pooling="attention")).eval()
+    with torch.no_grad():
+        m.encoder.pool_score.weight.zero_()
+        m.encoder.pool_score.bias.zero_()
+    # With zero scores, attention pooling is exactly mean pooling.
+    mean_model = LatentWake(tiny(pooling="mean")).eval()
+    mean_model.load_state_dict({k: v for k, v in m.state_dict().items() if "pool_score" not in k})
+    x, v = torch.randn(2, 64, len(FEATURES)), torch.randint(0, 10, (2,))
+    assert torch.allclose(m.embed(x, v), mean_model.embed(x, v), atol=1e-5)

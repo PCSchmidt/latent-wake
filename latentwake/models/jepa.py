@@ -49,6 +49,7 @@ class ModelConfig:
     dim_head: int = 32
     dropout: float = 0.1
     target: str = "latent"      # "latent" or "raw"
+    pooling: str = "mean"       # "mean" or "attention" over a chunk's steps
     use_action: bool = True
     sigreg_weight: float = 0.09  # LeWM default
     sigreg_knots: int = 17
@@ -80,6 +81,12 @@ class ChunkEncoder(nn.Module):
             Block(d, cfg.enc_heads, cfg.dim_head, cfg.enc_mlp, cfg.dropout) for _ in range(cfg.enc_depth)
         )
         self.norm = nn.LayerNorm(d)
+        if cfg.pooling not in ("mean", "attention"):
+            raise ValueError(f"unknown pooling {cfg.pooling!r}")
+        # Attention pooling scores each step, so a single anomalous step (a
+        # spoof's jump) can dominate the chunk embedding instead of being
+        # averaged away with seven normal steps.
+        self.pool_score = nn.Linear(d, 1) if cfg.pooling == "attention" else None
         self.projector = MLP(d, cfg.proj_hidden, d, norm="batch")
 
     def forward(self, chunks: torch.Tensor, vclass: torch.Tensor) -> torch.Tensor:
@@ -89,7 +96,12 @@ class ChunkEncoder(nn.Module):
         h = h + self.vessel(vclass).repeat_interleave(T, dim=0)[:, None, :]
         for blk in self.blocks:
             h = blk(h)
-        h = self.norm(h).mean(dim=1)
+        h = self.norm(h)
+        if self.pool_score is None:
+            h = h.mean(dim=1)
+        else:
+            w = torch.softmax(self.pool_score(h).squeeze(-1), dim=1)
+            h = (w.unsqueeze(-1) * h).sum(dim=1)
         return self.projector(h).reshape(B, T, -1)
 
 

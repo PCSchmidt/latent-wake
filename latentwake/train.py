@@ -185,6 +185,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--size", choices=["full", "small"], default="full")
     p.add_argument("--target", choices=["latent", "raw"], default="latent")
     p.add_argument("--no-action", action="store_true")
+    p.add_argument("--pooling", choices=["mean", "attention"], default="mean")
+    p.add_argument("--chunk-len", type=int, default=8, help="steps per chunk; must divide 64")
     p.add_argument("--sigreg-weight", type=float, default=0.09)
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=256)
@@ -193,7 +195,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto")
     a = p.parse_args(argv)
-    mk = dict(target=a.target, use_action=not a.no_action, sigreg_weight=a.sigreg_weight)
+    if 64 % a.chunk_len:
+        p.error("--chunk-len must divide the 64-step window")
+    mk = dict(target=a.target, use_action=not a.no_action, sigreg_weight=a.sigreg_weight,
+              pooling=a.pooling, chunk_len=a.chunk_len)
     model_cfg = ModelConfig.small(**mk) if a.size == "small" else ModelConfig(**mk)
     cfg = TrainConfig(
         processed=a.processed, out=a.out, model=model_cfg, epochs=a.epochs, batch_size=a.batch_size,
