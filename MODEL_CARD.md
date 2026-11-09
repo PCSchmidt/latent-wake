@@ -44,10 +44,22 @@ against moving normals of the same classes). Criteria and margins were fixed
 in DATA_CONTRACT.md before the test set was scored. The test set was frozen
 (sha256 826137bdb526) before any model trained, and was scored once.
 
-Results: see [EVAL_RESULTS.md](EVAL_RESULTS.md). On the validation anomaly
-set, averaged over three seeds, six of eight criteria were met; the JEPA's
-behavioral AUROC gain over Kalman was +0.090 against a 0.10 margin, and the
-fused detector's AUROC gain over Kalman +0.023 against 0.03.
+**Test results (three-seed means; full tables in [EVAL_RESULTS.md](EVAL_RESULTS.md)):
+3 of 8 contract criteria met.**
+
+| | JEPA | Kalman | Raw target | Fused |
+|---|--:|--:|--:|--:|
+| Loitering AUROC | **0.938** | 0.841 | 0.900 | 0.904 |
+| Route deviation AUROC | 0.677 | 0.634 | **0.694** | 0.664 |
+| Position spoof AUROC | 0.872 | **0.985** | 0.979 | 0.976 |
+| Teleport AUROC | 0.843 | **0.989** | 0.987 | 0.981 |
+| AIS gap AUROC | 0.832 | 0.815 | **0.835** | 0.835 |
+| False alarms on test normals at the 1% validation budget | 5.0% | 2.1% | 2.5% | 4.1% |
+
+The JEPA is the best detector of loitering; it does not clear the
+pre-registered margin over Kalman on behavioral anomalies overall (+0.070
+AUROC against 0.10), fusion does not beat Kalman by the required margin, and
+no detector held the 1% alert budget on test vessels.
 
 ## Intended use
 
@@ -69,8 +81,12 @@ model," not "wrongdoing."
 - **Weak on small kinematic anomalies alone.** The JEPA is near chance on the
   smallest spoofs and teleports, where Kalman and a raw-target predictor are
   above 0.9 AUROC; the fused detector relies on Kalman for those.
-- **Low detection at a 1% alert budget for behavioral anomalies.** About 10%
-  to 17% of injected loitering is caught at that budget on validation.
+- **Low detection at a 1% alert budget for behavioral anomalies.** About 17%
+  to 29% of injected loitering is caught on test at the validation budget, and
+  4% to 5% by the fused detector.
+- **Thresholds do not transfer between vessels.** Validation thresholds for a
+  1% budget gave about 5% false alarms on test vessels (about 10% on vessels
+  under way). Recalibrate on the target fleet before any use.
 - **Small strata.** Tanker strata have fewer than 200 validation windows and
   fall back to coarser calibration groups.
 - **Location is not used.** A learned location embedding helped route

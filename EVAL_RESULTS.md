@@ -26,7 +26,51 @@ Checkpoints scored (sha256):
 
 ## Interpretation
 
-_To be written after reading the numbers; the tables here are generated and are not edited._
+Written after reading the numbers. Every number below is a three-seed mean
+taken from the generated tables that follow; none of those tables was edited.
+
+**The headline claim is not supported at the pre-registered margins.** The
+JEPA beats Kalman on behavioral anomalies by +0.070 AUROC (margin 0.10) and
++0.039 AUPRC (margin 0.05). The direction matches validation (+0.090 AUROC)
+and holds for all three seeds, which agree to within 0.01. The gain is
+concentrated in loitering: 0.938 vs 0.841 AUROC (+0.097). On route deviation
+it is +0.043 (0.677 vs 0.634), and the raw-target predictor does slightly
+better there (0.694).
+
+**What holds up: the JEPA is the best single detector for loitering.** That
+is true on validation (0.80 vs Kalman 0.66 and raw target 0.73) and on test
+(0.94 vs 0.84 and 0.90), with every seed. It is the one place where
+predicting in latent space clearly beats predicting raw features (+0.038 on
+test). On small spoofs and teleports the JEPA is near chance (0.53 to 0.60 at
+the smallest level) while Kalman and the raw-target predictor exceed 0.92.
+
+**Fusion does not add enough over Kalman.** Fused AUROC is +0.019 over Kalman
+(margin 0.03), and fused AUPRC is 0.061 *below* Kalman's (margin 0.0). Taking
+the larger of two calibrated scores adds the JEPA's false alarms to Kalman's,
+which costs precision. It also hides the JEPA's own loitering detections at
+the alert budget: the JEPA alone catches 17% to 29% of loitering, the fused
+detector 4% to 5%.
+
+**The 1% alert budget did not transfer from validation to test.** Thresholds
+set on validation produced false alarms on test normals of 1.8% (physics),
+2.1% (Kalman), 2.5% (raw target), about 5.0% (JEPA), and 4.1% (fused). The
+contract allows 2%. Under-way normals fared worse: 7.5% for Kalman and about
+10% for the JEPA. Validation and test cover the same weeks with disjoint
+vessels (198 and 180), so the shift is between vessels, not over time, and
+it hit the learned detectors hardest. Detection rates at the budget
+(fused 0.501 vs Kalman 0.483, criterion met) are measured at false-alarm
+rates the budget did not hold, so they should be read with that in mind.
+
+**Test is easier than validation in absolute terms.** Every method scores
+higher on behavioral kinds on test (Kalman loitering 0.84 vs 0.66), because
+the test anomaly set is injected into different windows. The criteria compare
+methods on the same set, so this does not favor any method.
+
+**Not shown here.** Anomalies are synthetic, injected into real tracks; the
+data covers one region and one season and Class A vessels only. A vessel-level
+bootstrap of these differences and a breakdown of where test false alarms
+come from are in `reports/eval-v2/posthoc/` (exploratory, computed after the
+single scoring).
 
 ### AUROC by kind (mean over severity levels)
 

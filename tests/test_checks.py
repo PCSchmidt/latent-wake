@@ -281,3 +281,41 @@ def test_benchmark_scores_once_and_records_a_miss(processed, tmp_path, monkeypat
     assert "1 of 2 criteria met; not met: behavioral" in text and "### AUROC by kind" in text
     with pytest.raises(checks.Blocked, match="--force"):
         checks.write_eval_results(cfg_path, dest)
+
+
+def test_posthoc_reproduces_recorded_rates_and_bootstraps(processed, tmp_path):
+    import numpy as np
+    import yaml
+
+    from latentwake import posthoc
+    from latentwake.evaluate import cell_metrics
+
+    p = processed / "processed"
+    ts_dir = tmp_path / "ts"
+    ts = build_from_processed(p, "test", seed=0, per_cell=3)
+    save_test_set(ts, ts_dir)
+    rng = np.random.default_rng(0)
+    anom = (ts.cells.kind != "normal").to_numpy()
+    scores = {m: rng.normal(size=len(ts.cells)) + shift * anom
+              for m, shift in (("kalman", 0.5), ("jepa-s0", 1.0), ("jepa-s1", 1.0), ("fused-s0", 1.2))}
+    thr = {m: 1.5 for m in scores}
+    out = tmp_path / "eval"
+    out.mkdir()
+    res = cell_metrics(ts.cells, scores, thr)
+    res.to_csv(out / "results.csv", index=False)
+    np.savez_compressed(out / "scores.npz", **scores)
+    contract = _write(tmp_path, FILLED)
+    cfg = tmp_path / "eval.yaml"
+    cfg.write_text(yaml.safe_dump({"testset": str(ts_dir), "processed": str(p), "out": str(out),
+                                   "models": {}, "contract": str(contract)}))
+    dest = posthoc.run(cfg, n_boot=20)
+
+    normal = (ts.cells.kind == "normal").to_numpy()
+    rec = json.loads((dest / "thresholds.json").read_text())
+    recorded = res[res.kind == "normal"].set_index("method").fpr_at_budget
+    for m, t in rec.items():
+        assert np.mean(scores[m][normal] > t) == pytest.approx(recorded[m])
+    boot = pd.read_csv(dest / "bootstrap.csv")
+    assert list(boot.criterion) == ["behavioral"]
+    assert boot.ci_low.iat[0] <= boot.difference.iat[0] <= boot.ci_high.iat[0]
+    assert (dest / "POSTHOC.md").read_text().startswith("# Post-hoc analysis")
