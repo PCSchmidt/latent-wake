@@ -1,14 +1,8 @@
 {
   "passed_gates": [
-    "data_contract",
     "pipeline_validated"
   ],
-  "approvals": {
-    "data_contract": {
-      "by": "Chris Schmidt",
-      "at": "2026-11-09T14:15:22Z"
-    }
-  },
+  "approvals": {},
   "approval_history": [
     {
       "gate": "data_contract",
@@ -17,6 +11,14 @@
         "at": "2026-11-08T23:14:10Z"
       },
       "superseded_at": "2026-11-09T14:15:15Z"
+    },
+    {
+      "gate": "data_contract",
+      "approval": {
+        "by": "Chris Schmidt",
+        "at": "2026-11-09T14:15:22Z"
+      },
+      "superseded_at": "2026-11-09T20:01:38Z"
     }
   ],
   "reopened": [
@@ -28,6 +30,14 @@
       "reason": "contract v2: Class A population, transit-only behavioral injection, class x under-way calibration",
       "by": "Chris Schmidt",
       "at": "2026-11-09T14:15:15Z"
+    },
+    {
+      "gates": [
+        "data_contract"
+      ],
+      "reason": "contract v2.1: tail-probability calibration for every detector",
+      "by": "Chris Schmidt",
+      "at": "2026-11-09T20:01:38Z"
     }
   ]
 }
