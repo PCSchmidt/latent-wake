@@ -203,6 +203,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-action", action="store_true")
     p.add_argument("--pooling", choices=["mean", "attention"], default="mean")
     p.add_argument("--use-position", action="store_true", help="add a location-cell embedding (contract v2 option)")
+    p.add_argument("--position-dropout", type=float, default=0.0,
+                   help="with --use-position: share of training windows trained without location")
     p.add_argument("--chunk-len", type=int, default=8, help="steps per chunk; must divide 64")
     p.add_argument("--sigreg-weight", type=float, default=0.09)
     p.add_argument("--epochs", type=int, default=30)
@@ -215,7 +217,8 @@ def main(argv: list[str] | None = None) -> None:
     if 64 % a.chunk_len:
         p.error("--chunk-len must divide the 64-step window")
     mk = dict(target=a.target, use_action=not a.no_action, sigreg_weight=a.sigreg_weight,
-              pooling=a.pooling, chunk_len=a.chunk_len, use_position=a.use_position)
+              pooling=a.pooling, chunk_len=a.chunk_len, use_position=a.use_position,
+              position_dropout=a.position_dropout)
     model_cfg = ModelConfig.small(**mk) if a.size == "small" else ModelConfig(**mk)
     cfg = TrainConfig(
         processed=a.processed, out=a.out, model=model_cfg, epochs=a.epochs, batch_size=a.batch_size,

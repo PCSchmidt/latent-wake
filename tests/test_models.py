@@ -284,3 +284,24 @@ def test_train_with_position_end_to_end(tmp_path):
     save_test_set(ts, tmp_path / "ts")
     res = evaluate(tmp_path / "ts", tmp_path / "processed", {"pos": tmp_path / "run" / "best.pt"}, tmp_path / "e1")
     assert res[res.kind != "normal"].auroc.between(0, 1).all()
+
+
+def test_position_dropout_only_in_training():
+    m = LatentWake(tiny(use_position=True, n_cells=20, position_dropout=1.0))
+    x, v = torch.randn(4, 64, len(FEATURES)), torch.randint(0, 10, (4,))
+    a, b = torch.zeros(4, 64, dtype=torch.long), torch.full((4, 64), 7)
+    m.train()
+    torch.manual_seed(0); za = m.embed(x, v, a)
+    torch.manual_seed(0); zb = m.embed(x, v, b)
+    assert torch.allclose(za, zb)  # location fully dropped while training
+    m.eval()
+    assert not torch.allclose(m.embed(x, v, a), m.embed(x, v, b))
+
+
+def test_alerts_by_stratum():
+    from latentwake.evaluate import alerts_by_stratum, summarize_strata
+
+    key = np.array([2, 2, 3, 3])
+    t = alerts_by_stratum({"m": np.array([0.0, 5.0, 0.0, 0.0])}, {"m": 1.0}, key)
+    assert list(t.m) == [0.5, 0.0] and list(t.under_way) == [False, True]
+    assert "under-way" in summarize_strata(t)

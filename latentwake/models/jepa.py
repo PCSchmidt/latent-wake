@@ -59,6 +59,7 @@ class ModelConfig:
     # invisible to a model that sees only relative motion.
     use_position: bool = False
     n_cells: int = 0            # grid size; set from the processed data when use_position
+    position_dropout: float = 0.0  # share of training windows whose location embedding is dropped
     sigreg_weight: float = 0.09  # LeWM default
     sigreg_knots: int = 17
     sigreg_proj: int = 1024
@@ -88,6 +89,7 @@ class ChunkEncoder(nn.Module):
         if cfg.use_position and cfg.n_cells <= 0:
             raise ValueError("use_position needs n_cells > 0")
         self.place = nn.Embedding(cfg.n_cells, d) if cfg.use_position else None
+        self.position_dropout = cfg.position_dropout
         self.blocks = nn.ModuleList(
             Block(d, cfg.enc_heads, cfg.dim_head, cfg.enc_mlp, cfg.dropout) for _ in range(cfg.enc_depth)
         )
@@ -108,7 +110,13 @@ class ChunkEncoder(nn.Module):
         if self.place is not None:
             if cells is None:
                 raise ValueError("position-context encoder needs cells")
-            h = h + self.place(cells.reshape(B * T))[:, None, :]
+            p = self.place(cells.reshape(B * T)).reshape(B, T, -1)
+            if self.training and self.position_dropout > 0:
+                # Drop location for whole windows so the model must also predict
+                # from motion alone, rather than memorize each cell's traffic.
+                keep = (torch.rand(B, 1, 1, device=p.device) >= self.position_dropout).to(p.dtype)
+                p = p * keep
+            h = h + p.reshape(B * T, -1)[:, None, :]
         for blk in self.blocks:
             h = blk(h)
         h = self.norm(h)

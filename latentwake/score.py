@@ -40,7 +40,7 @@ def transition_errors(model: LatentWake, X: np.ndarray, vclass: np.ndarray, batc
     out = []
     for a in range(0, len(X), batch):
         x = torch.as_tensor(np.ascontiguousarray(X[a : a + batch], dtype=np.float32), device=device)
-        v = torch.as_tensor(np.ascontiguousarray(vclass[a : a + batch], dtype=np.int64), device=device)
+        v = torch.as_tensor(np.array(vclass[a : a + batch], dtype=np.int64), device=device)
         c = None
         if model.cfg.use_position:
             c = torch.as_tensor(np.ascontiguousarray(cells[a : a + batch], dtype=np.int64), device=device)
