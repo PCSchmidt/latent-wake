@@ -337,3 +337,28 @@ def test_tail_calibration_ranks_beyond_validation_and_falls_back():
     assert np.all(np.diff(t) > 0)
     # Unknown or small stratum 9 (under way) falls back to the under-way group, then to all.
     np.testing.assert_allclose(c.transform(np.array([0.5]), np.array([9])), c.transform(np.array([0.5]), np.array([4])))
+
+
+def test_shorter_context_folds_windows_and_scores_every_step():
+    m = LatentWake(tiny(window_len=32))
+    x, v = torch.randn(3, 64, len(FEATURES)), torch.randint(0, 10, (3,))
+    out = m(x, v)
+    assert out["per_step"].shape == (3, 2 * (m.cfg.n_chunks - 1))
+    assert out["z"].shape[0] == 6
+    out["loss"].backward()
+    s = m.surprise(x, v)
+    # Folding is the same as scoring each half on its own.
+    halves = torch.cat([m.surprise(x[:, :32], v), m.surprise(x[:, 32:], v)], dim=1)
+    torch.testing.assert_close(s, halves)
+    with pytest.raises(ValueError, match="multiple"):
+        m(torch.randn(2, 40, len(FEATURES)), v[:2])
+
+
+def test_train_cli_ablation_flags(tmp_path, monkeypatch):
+    import latentwake.train as tr
+
+    seen = {}
+    monkeypatch.setattr(tr, "train", lambda cfg: seen.setdefault("cfg", cfg))
+    tr.main(["--out", str(tmp_path), "--window-len", "32", "--embed-dim", "64", "--sigreg-weight", "0.3"])
+    mc = seen["cfg"].model
+    assert (mc.window_len, mc.embed_dim, mc.sigreg_weight, mc.n_chunks) == (32, 64, 0.3, 4)

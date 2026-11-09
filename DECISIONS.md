@@ -6,6 +6,9 @@ to review at the `data_contract` gate.
 
 | Date | Decision | Why | Alternatives considered | By |
 |------|----------|-----|-------------------------|----|
+| 2026-11-09 | Ablations: SIGReg weight 0 / 0.02 / 0.3, no action conditioning, keep all anchored windows, latent size 64, context 32 steps; raw target from the main runs. One seed each, more only where a result lands within 0.02 of the main model. Scored on the validation anomaly set only | They explain components rather than choose a model, and the test set stays at one look; seeds agreed to within 0.01 on the main model | Score ablations on the test set once as well | Owner (on agent recommendation) |
+| 2026-11-09 | Isolation Forest, LSTM autoencoder, and TrAISformer-style baselines: settings fixed on validation, then scored on the test set once in a separately recorded benchmark | Completes the results table without tuning anything against the test set | Validation only; drop them | Owner (on agent recommendation) |
+| 2026-11-09 | VICReg and EMA/stop-gradient ablations deferred until after the demo | They need new training code; the other ablations answer the main component questions first | Build them now | Owner (on agent recommendation) |
 | 2026-11-09 | `model_eval` certifies that the frozen test set was scored once by the pre-registered rules and reported, pass or fail. The criteria verdict is recorded (`criteria.json`, EVAL_RESULTS.md), not blocking; integrity checks (checksum, freeze order, a single scoring) still block | Decided before the test set was scored, when three-seed validation predicted two narrow misses; deciding after a failure would look like an escape hatch, and blocking would freeze ablations and the demo over an honestly reported miss | Block on any missed criterion | Owner |
 | 2026-11-09 | Score the test set now, with no further architecture round | Three seeds agree to within 0.01, so the validation shortfall is real; more tuning against one validation anomaly set risks overfitting it | One more time-boxed improvement round on validation | Owner (on agent recommendation) |
 | 2026-11-09 | Contract v2.1: calibrate every detector, baselines included, as a per-stratum validation tail probability; keep every margin | Median/MAD z sent 99% of fused alerts to stopped windows, and calibrating the models but not the baselines handicapped Kalman. Tail calibration spreads alerts in proportion to strata and is the fair comparison, though on one validation seed it puts two AUROC criteria just under their margins (reports/validation-v2.md) | Keep median/MAD (all criteria pass, but the alarm is broken and the baseline unmatched); adopt tail and lower the margins (chosen after seeing results) | Owner (on agent recommendation) |
@@ -42,7 +45,4 @@ to review at the `data_contract` gate.
 ## Open questions for the owner
 
 
-None open. Next to decide: which ablations make the `ablation_study` gate,
-and whether the remaining baselines (Isolation Forest, LSTM autoencoder,
-TrAISformer-style) are scored on the frozen test set or reported on
-validation only, since the test set has now been looked at once.
+None open.
