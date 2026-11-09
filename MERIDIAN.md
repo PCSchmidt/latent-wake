@@ -11,26 +11,26 @@ platform. Treat the rules below as the contract the commit boundary enforces.
 
 ## Gate sequence (do them in order; never skip)
 
-0. **data_contract** — Data Contract Defined
+0. **data_contract** — Data Contract Approved
    - required artifacts: DATA_CONTRACT.md, DECISIONS.md
    - verified by: validate-data-contract.sh
-1. **pipeline_validated** — Data Pipeline Validated
+1. **pipeline_validated** — Pipeline Validated, Test Set Frozen
    - depends on: data_contract
-   - verified by: validate-schema.sh, validate-splits.sh, validate-preprocessing.sh, run-pipeline-tests.sh
-2. **model_eval** — Model Evaluation Complete
+   - verified by: run-pipeline-tests.sh, validate-schema.sh, validate-preprocessing.sh, validate-splits.sh, validate-testset.sh
+2. **training_stable** — Training Stable Across Seeds
    - depends on: pipeline_validated
+   - verified by: validate-training.sh
+3. **model_eval** — Model Evaluation Approved
+   - depends on: training_stable
    - required artifacts: EVAL_RESULTS.md, MODEL_CARD.md
-   - verified by: run-benchmark.sh, validate-metrics.sh, generate-model-card.sh
-3. **ablation_study** — Ablation Study Complete
+   - verified by: run-benchmark.sh, validate-metrics.sh
+4. **ablation_study** — Ablation Study Approved
    - depends on: model_eval
    - required artifacts: ABLATION_RESULTS.md
-4. **evidence_pdf** — Evidence PDF Generated
-   - depends on: model_eval
-   - verified by: generate-evidence-pdf.sh
-5. **deploy_ready** — Ready to Deploy
-   - depends on: model_eval
-   - required artifacts: DEPLOYMENT_CONFIG.md, CHANGELOG.md, MODEL_CARD.md
-   - verified by: validate-serving-config.sh, test-inference-latency.sh
+5. **demo_shipped** — Demo and Write-up Shipped
+   - depends on: ablation_study
+   - required artifacts: MODEL_CARD.md, CHANGELOG.md, docs/WRITEUP.md
+   - verified by: run-all-tests.sh
 
 A gate's work is not done until its verifier passes. Before committing, run:
 

@@ -66,11 +66,29 @@ higher on behavioral kinds on test (Kalman loitering 0.84 vs 0.66), because
 the test anomaly set is injected into different windows. The criteria compare
 methods on the same set, so this does not favor any method.
 
+**Post-hoc analysis (exploratory; computed after the single scoring from the
+saved scores; it does not change the verdict).** Full tables:
+`reports/eval-v2/posthoc/POSTHOC.md`.
+
+- *Uncertainty.* A cluster bootstrap over the 172 source vessels puts the
+  JEPA's behavioral AUROC gain over Kalman at 0.032 to 0.115 (95%), so the
+  gain is clearly positive and the 0.10 margin is not ruled out; 6% of draws
+  reach it. The AUPRC gain interval (−0.013 to 0.091) includes zero. Fused
+  over Kalman on AUROC (0.009 to 0.028) falls short of 0.03 in every part of
+  the interval.
+- *Where the false alarms come from.* They are concentrated: 22 to 31 of the
+  157 vessels with normal windows raise all of them, and the top five raise
+  71% to 89%. One stratum, 89 windows of fishing vessels under way, alarms at
+  45% to 85% for every detector, including the physics check. Without it,
+  Kalman's rate is 1.0% and the raw-target predictor's 1.1% to 1.2%, which is
+  within budget. The JEPA has a second, model-specific problem: about a
+  quarter of its false alarms come from anchored cargo ships and a quarter
+  to a third from "other" vessels, where the baselines barely alarm. Without the
+  fishing stratum the JEPA's rate is still 3.5% to 4.2%. The fused detector
+  inherits it.
+
 **Not shown here.** Anomalies are synthetic, injected into real tracks; the
-data covers one region and one season and Class A vessels only. A vessel-level
-bootstrap of these differences and a breakdown of where test false alarms
-come from are in `reports/eval-v2/posthoc/` (exploratory, computed after the
-single scoring).
+data covers one region and one season and Class A vessels only.
 
 ### AUROC by kind (mean over severity levels)
 

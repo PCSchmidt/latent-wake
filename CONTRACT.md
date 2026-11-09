@@ -24,7 +24,7 @@ plan is in `docs/SCOPE.md`; the success criteria are in `DATA_CONTRACT.md`.
 
 - Download, cleaning, resampling, and windowing of three months of NOAA AIS
 - Seeded synthetic anomaly injection and frozen, checksummed test sets
-- The JEPA model, training, per-class calibration, and evaluation
+- The JEPA model, training, per-stratum calibration, and evaluation
 - Baselines: physics residual, Kalman filter, raw-target predictor (built);
   LSTM autoencoder, Isolation Forest, TrAISformer-style forecaster (planned)
 - Ablations: SIGReg weight, SIGReg vs VICReg vs EMA, action on/off, context length, latent size
@@ -66,6 +66,6 @@ A feature is not complete until:
 5. **Hardened:** reproducible from config and seed; checkpoints and frozen test sets recoverable
 
 Additionally for the ML component:
-- Model meets every criterion in DATA_CONTRACT.md
+- The frozen test set is scored once against every criterion in DATA_CONTRACT.md and the outcome is reported in EVAL_RESULTS.md, pass or fail (owner decision 2026-11-09, made before scoring)
 - MODEL_CARD.md is complete and accurate
 - Every reported number traces to a run folder and a frozen test-set checksum

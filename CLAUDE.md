@@ -1,7 +1,6 @@
 # CLAUDE.md
 
 Session-start guidance for this project with Meridian. Keep under 60 lines.
-
 ## This project
 
 Latent Wake: a trajectory JEPA that flags anomalous AIS vessel tracks. Plan in
@@ -9,8 +8,9 @@ Latent Wake: a trajectory JEPA that flags anomalous AIS vessel tracks. Plan in
 `DECISIONS.md`; gate check paths in `configs/eval.yaml`. Rules that matter:
 - Never train on real data before `data_contract` passes, and never before the
   test set is frozen (`validate-testset.sh`, `run-benchmark.sh` enforce this).
-- Never tune against a test set; calibrate on validation only. Contract v2: Class A
-  only; behavioral kinds only in moving transit vessels, scored against those.
+- Never tune against a test set; calibrate on validation only (contract v2.1).
+- Test set v2 was scored once (2026-11-09, 3 of 8 criteria met). Never re-score
+  it; analyze saved scores with `latentwake.posthoc`.
 - Owner-approval gates are approved by Chris in his own terminal, not by an agent.
 
 ## What Meridian is

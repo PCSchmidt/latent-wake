@@ -42,5 +42,7 @@ to review at the `data_contract` gate.
 ## Open questions for the owner
 
 
-See every `[DECIDE ...]` marker in DATA_CONTRACT.md. The main one is the
-headline claim, which sets the success thresholds.
+None open. Next to decide: which ablations make the `ablation_study` gate,
+and whether the remaining baselines (Isolation Forest, LSTM autoencoder,
+TrAISformer-style) are scored on the frozen test set or reported on
+validation only, since the test set has now been looked at once.
