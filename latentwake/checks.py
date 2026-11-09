@@ -10,14 +10,19 @@ in scripts/ call these with paths from configs/eval.yaml.
     splits        no vessel or time period on both sides of the split
     testset       the frozen test set verifies and was built from held-out windows
     training      three or more seeds per latent model, none collapsed
-    benchmark     every model was trained after the test set was frozen; then evaluate
-    metrics       evaluation results meet every criterion in DATA_CONTRACT.md
+    benchmark     every model was trained after the test set was frozen; then score
+                  the test set once (a rerun with identical inputs is a no-op; with
+                  different inputs it blocks)
+    metrics       evaluation results meet every criterion in DATA_CONTRACT.md;
+                  with --record, write the verdict instead of blocking on a miss
+    report        write EVAL_RESULTS.md from the recorded benchmark and verdict
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import re
 import sys
@@ -233,16 +238,56 @@ def check_freeze_order(cfg: dict) -> None:
     _ok(f"all {len(cfg['models'])} model(s) trained after the test set was frozen ({frozen})")
 
 
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def benchmark_inputs(cfg: dict) -> dict:
+    """Everything that determines the test scores. Scoring twice with the same inputs is one look."""
+    manifest = json.loads((Path(cfg["testset"]) / "manifest.json").read_text())
+    return {
+        "testset": str(cfg["testset"]),
+        "testset_sha256": manifest["sha256"],
+        "checkpoints": {k: _sha256(Path(v)) for k, v in sorted(cfg["models"].items())},
+        "fuse_with_kalman": cfg.get("fuse_with_kalman"),
+        "alert_fpr": float(cfg.get("alert_fpr", 0.01)),
+        "calibration": cfg.get("calibration", "tail"),
+    }
+
+
 def run_benchmark(cfg_path: Path) -> None:
+    """Score the frozen test set once.
+
+    The first run records its inputs in OUT/benchmark.json. A later run with
+    identical inputs (Meridian re-runs pre-hooks at mark-passed) reuses the
+    results instead of scoring again. A run with different inputs blocks:
+    that would be a second look at the test set, which the contract forbids.
+    """
     from latentwake.evaluate import run as evaluate
 
     cfg = load_eval_config(cfg_path)
     check_testset(Path(cfg["testset"]), Path(cfg["processed"]))
     check_freeze_order(cfg)
     out = Path(cfg["out"])
+    inputs = benchmark_inputs(cfg)
+    record = out / "benchmark.json"
+    if record.exists():
+        prior = json.loads(record.read_text())
+        same = {k: v for k, v in prior.items() if k in inputs} == inputs
+        _need(same, f"the test set was already scored at {prior.get('scored_at')} with different inputs "
+                    f"(see {record}); scoring again would be a second look at the test set")
+        _need((out / "results.csv").exists(), f"{record} exists but {out / 'results.csv'} is missing")
+        _ok(f"test set already scored at {prior['scored_at']} with these exact inputs; not scoring again")
+        return
     evaluate(Path(cfg["testset"]), Path(cfg["processed"]), {k: Path(v) for k, v in cfg["models"].items()}, out,
-             cfg.get("fuse_with_kalman"), float(cfg.get("alert_fpr", 0.01)), cfg.get("calibration", "tail"))
-    _ok(f"results written to {out}")
+             cfg.get("fuse_with_kalman"), inputs["alert_fpr"], inputs["calibration"])
+    scored_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    record.write_text(json.dumps({**inputs, "scored_at": scored_at}, indent=2) + "\n")
+    _ok(f"test set scored once at {scored_at}; results in {out}")
 
 
 # ------------------------------------------------------------------- metrics
@@ -278,13 +323,66 @@ def evaluate_criteria(results: pd.DataFrame, criteria: list[dict]) -> list[dict]
     return out
 
 
-def check_metrics(results_csv: Path, contract: Path) -> None:
+def check_metrics(results_csv: Path, contract: Path, record: bool = False) -> None:
+    """Check every contract criterion.
+
+    Without record, any miss blocks (use it on validation). With record (the
+    model_eval gate, owner decision 2026-11-09), the verdict is written to
+    criteria.json next to the results and a miss does not block: the gate
+    certifies that the frozen test set was scored once by the pre-registered
+    rules and reported, pass or fail. Missing or unreadable results still block.
+    """
     _need(Path(results_csv).exists(), f"{results_csv} missing; run the benchmark first")
     rows = evaluate_criteria(pd.read_csv(results_csv), load_thresholds(contract))
     for r in rows:
         print(f"  {'ok  ' if r['passed'] else 'FAIL'} {r['id']}: {r['detail']}")
     failed = [r["id"] for r in rows if not r["passed"]]
+    if record:
+        verdict = {"all_passed": not failed, "failed": failed, "criteria": rows,
+                   "contract_sha256": _sha256(Path(contract))}
+        (Path(results_csv).parent / "criteria.json").write_text(json.dumps(verdict, indent=2) + "\n")
+        _ok(f"verdict recorded: {len(rows) - len(failed)} of {len(rows)} criteria met"
+            + (f"; not met: {failed}" if failed else ""))
+        return
     _need(not failed, f"{len(failed)} contract criterion/criteria not met: {failed}")
+
+
+def write_eval_results(cfg_path: Path, dest: Path = Path("EVAL_RESULTS.md"), force: bool = False) -> None:
+    """Write EVAL_RESULTS.md from the recorded benchmark, verdict, and summary. Never edits numbers by hand."""
+    cfg = load_eval_config(cfg_path)
+    out = Path(cfg["out"])
+    for f in ("benchmark.json", "criteria.json", "summary.md"):
+        _need((out / f).exists(), f"{out / f} missing; run run-benchmark.sh and validate-metrics.sh first")
+    _need(force or not dest.exists(), f"{dest} exists; pass --force to regenerate it")
+    bench = json.loads((out / "benchmark.json").read_text())
+    verdict = json.loads((out / "criteria.json").read_text())
+    met = sum(r["passed"] for r in verdict["criteria"])
+    lines = [
+        "# Evaluation results: frozen test set",
+        "",
+        f"Test set `{bench['testset']}` (sha256 {bench['testset_sha256'][:12]}), scored once at "
+        f"{bench['scored_at']}. Calibration: {bench['calibration']}; alert budget "
+        f"{bench['alert_fpr']:.0%}; fused detector built from `{bench['fuse_with_kalman']}`.",
+        "",
+        f"**Contract verdict: {met} of {len(verdict['criteria'])} criteria met"
+        + ("." if verdict["all_passed"] else f"; not met: {', '.join(verdict['failed'])}.") + "**",
+        "",
+        "| Criterion | Result | Met |",
+        "|---|---|---|",
+        *[f"| `{r['id']}` | {r['detail']} | {'yes' if r['passed'] else '**no**'} |" for r in verdict["criteria"]],
+        "",
+        "Checkpoints scored (sha256):",
+        "",
+        *[f"- `{k}`: {v[:12]}" for k, v in bench["checkpoints"].items()],
+        "",
+        "## Interpretation",
+        "",
+        "_To be written after reading the numbers; the tables here are generated and are not edited._",
+        "",
+        ("\n" + (out / "summary.md").read_text()).replace("\n## ", "\n### ").lstrip("\n"),
+    ]
+    dest.write_text("\n".join(lines))
+    _ok(f"wrote {dest}")
 
 
 # ---------------------------------------------------------------------- main
@@ -304,6 +402,10 @@ def main(argv: list[str] | None = None) -> int:
     m = sub.add_parser("metrics")
     m.add_argument("results", type=Path)
     m.add_argument("contract", type=Path, nargs="?", default=Path("DATA_CONTRACT.md"))
+    m.add_argument("--record", action="store_true", help="write criteria.json; a missed criterion does not block")
+    r = sub.add_parser("report")
+    r.add_argument("config", type=Path, nargs="?", default=Path("configs/eval.yaml"))
+    r.add_argument("--force", action="store_true")
     a = p.parse_args(argv)
     print(f"[latentwake.checks {a.cmd}]")
     try:
@@ -315,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
             "testset": lambda: check_testset(a.testset, a.processed),
             "training": lambda: check_training(a.config),
             "benchmark": lambda: run_benchmark(a.config),
-            "metrics": lambda: check_metrics(a.results, a.contract),
+            "metrics": lambda: check_metrics(a.results, a.contract, a.record),
+            "report": lambda: write_eval_results(a.config, force=a.force),
         }[a.cmd]()
     except Blocked as err:
         print(f"  BLOCKED {err}")
