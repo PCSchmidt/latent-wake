@@ -115,3 +115,24 @@ validation tail probability in that stratum, for every detector including
 the baselines. A stratum of nearly constant scores cannot inflate tail
 probabilities, so a shared threshold spreads alerts across strata in
 proportion to their size.
+
+## Tail calibration on validation (`reports/val-v2-tail`)
+
+Every detector now puts about 30% of its validation alerts on under-way
+windows (31% of windows). Fused false alarms on moving normals: 0.82%.
+
+| Criterion | MAD (v2) | Tail (v2.1) | Margin |
+|---|--:|--:|--:|
+| JEPA over Kalman, behavioral AUROC | +0.136 | +0.089 | 0.10 |
+| Fused over Kalman, AUROC | +0.039 | +0.022 | 0.03 |
+| Fused over JEPA, AUROC | +0.033 | +0.040 | 0.03 |
+| JEPA over Kalman, behavioral AUPRC | +0.175 | +0.093 | 0.05 |
+| Fused over Kalman, AUPRC | +0.105 | +0.020 | 0.00 |
+| Fused over JEPA, AUPRC | +0.064 | +0.118 | 0.03 |
+| Fused false alarms (limit 0.02) | 0.0107 | 0.0119 | |
+| Fused detection at budget vs Kalman | 0.396 vs 0.303 | 0.479 vs 0.463 | 0.00 |
+
+Kalman behavioral AUROC rises from 0.568 to 0.615 under matched calibration;
+the JEPA stays at 0.704. Fusion costs loitering AUROC (0.740 vs the JEPA's
+0.798): Kalman's score adds noise there. Adopted as contract v2.1 with the
+margins unchanged; seeds 1 and 2 come next.

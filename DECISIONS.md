@@ -6,6 +6,8 @@ to review at the `data_contract` gate.
 
 | Date | Decision | Why | Alternatives considered | By |
 |------|----------|-----|-------------------------|----|
+| 2026-11-09 | Contract v2.1: calibrate every detector, baselines included, as a per-stratum validation tail probability; keep every margin | Median/MAD z sent 99% of fused alerts to stopped windows, and calibrating the models but not the baselines handicapped Kalman. Tail calibration spreads alerts in proportion to strata and is the fair comparison, though on one validation seed it puts two AUROC criteria just under their margins (reports/validation-v2.md) | Keep median/MAD (all criteria pass, but the alarm is broken and the baseline unmatched); adopt tail and lower the margins (chosen after seeing results) | Owner (on agent recommendation) |
+| 2026-11-09 | Drop learned location-cell context from the main model; report it as an ablation | Location dropout did not close its generalization gap (validation loss about 8x the plain JEPA's); it helps route deviation (+0.10 AUROC) and hurts everything else | More position variants; a non-learned lane prior (possible later work) | Agent |
 | 2026-11-09 | Carry forward mean pooling with 8-step chunks; drop attention pooling and 4-step chunks; try position context once more with location dropout | On validation v2, attention pooling matched mean pooling; 4-step chunks gained on spoofs but lost on loitering, the JEPA's job; position context led on route deviation but generalized poorly (reports/validation-v2.md) | Carry 4-step chunks; drop position context | Agent |
 | 2026-11-09 | Reopen `data_contract` and `pipeline_validated`; retire test set v1 unscored; freeze v2 on Class A data; retrain every model after it | The contract changed what the test set contains, so the gates that certified the old one no longer apply | Patch v1 in place (breaks its checksum and the freeze rule) | Owner |
 | 2026-11-09 | Contract v2 amendment 4: keep route deviation gated; add a position-context option (0.05° location-cell embedding per chunk) | Every method scores about 0.5 on route deviation; with relative motion only, a turn off a lane looks like any other turn. Location lets a model learn where lanes run | Drop route deviation from the criteria; report it only | Owner (on agent recommendation) |
@@ -37,13 +39,6 @@ to review at the `data_contract` gate.
 
 ## Open questions for the owner
 
-- **Window calibration for fusion (proposed amendment v2.1).** On validation
-  the fused detector, with per-stratum median/MAD, put 99% of its alerts on
-  stopped windows (reports/validation-v2.md). Proposed: calibrate every
-  detector's window score as a per-stratum validation tail probability
-  (`--calibration tail`). The fusion rule's form (max of calibrated window
-  scores, 1% validation budget) and every margin stay the same. Decide after
-  comparing both on the validation anomaly set; the test set stays unscored.
 
 See every `[DECIDE ...]` marker in DATA_CONTRACT.md. The main one is the
 headline claim, which sets the success thresholds.
