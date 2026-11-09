@@ -1,6 +1,7 @@
 {
   "passed_gates": [
-    "data_contract"
+    "data_contract",
+    "pipeline_validated"
   ],
   "approvals": {
     "data_contract": {
