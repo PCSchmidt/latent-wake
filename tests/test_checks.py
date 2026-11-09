@@ -12,7 +12,7 @@ import pytest
 from latentwake import checks
 from latentwake.data import preprocess as pp
 from latentwake.data.synthetic import simulate_days, write_interim
-from latentwake.inject.build import build_test_set, save_test_set
+from latentwake.inject.build import build_from_processed, build_test_set, save_test_set
 
 FILLED = """# DATA_CONTRACT.md
 
@@ -116,13 +116,28 @@ def test_preprocessing_check(processed):
 
 def test_testset_check_requires_test_split_and_freeze_time(processed):
     p = processed / "processed"
-    X, meta, raw = pp.load_split(p, "test", normalized=False, raw=True)
-    save_test_set(build_test_set(X, raw, meta, seed=0, per_cell=3), processed / "ts")
+    save_test_set(build_from_processed(p, "test", seed=0, per_cell=3), processed / "ts")
     checks.check_testset(processed / "ts", p)
-    Xv, meta_v, raw_v = pp.load_split(p, "val", normalized=False, raw=True)
-    save_test_set(build_test_set(Xv, raw_v, meta_v, seed=0, per_cell=3), processed / "ts-val")
+    save_test_set(build_from_processed(p, "val", seed=0, per_cell=3), processed / "ts-val")
     with pytest.raises(checks.Blocked, match="expected only 'test'"):
         checks.check_testset(processed / "ts-val", p)
+    # A test set built the v1 way (no location cells) no longer passes.
+    X, meta, raw = pp.load_split(p, "test", normalized=False, raw=True)
+    save_test_set(build_test_set(X, raw, meta, seed=0, per_cell=3), processed / "ts-v1")
+    with pytest.raises(checks.Blocked, match="location cells"):
+        checks.check_testset(processed / "ts-v1", p)
+
+
+def test_preprocessing_check_requires_class_a(processed, tmp_path):
+    import shutil
+
+    p = tmp_path / "copy"
+    shutil.copytree(processed / "processed", p)
+    stats = json.loads((p / "stats.json").read_text())
+    stats["config"]["transceivers"] = None
+    (p / "stats.json").write_text(json.dumps(stats))
+    with pytest.raises(checks.Blocked, match="Class A"):
+        checks.check_preprocessing(p, min_train_windows=10)
 
 
 def _fake_run(root: Path, name: str, started_at: str, erank: float, target="latent", sigreg=0.09) -> Path:

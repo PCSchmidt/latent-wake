@@ -15,6 +15,8 @@ Ablations are config switches:
                         normalized features directly (does latent space help?)
     use_action=False    no action conditioning (does knowing the reports help?)
     sigreg_weight=0     no anti-collapse term (does the encoder collapse?)
+    use_position=True   add a location-cell embedding per chunk (does knowing
+                        where the ship is help with route deviation?)
 """
 
 from __future__ import annotations
@@ -49,7 +51,14 @@ class ModelConfig:
     dim_head: int = 32
     dropout: float = 0.1
     target: str = "latent"      # "latent" or "raw"
+    pooling: str = "mean"       # "mean" or "attention" over a chunk's steps
     use_action: bool = True
+    # Position context (contract v2 option): add an embedding of the location
+    # grid cell to each chunk, so the model can learn where lanes run and where
+    # ships normally turn or slow. Off by default; route deviation is otherwise
+    # invisible to a model that sees only relative motion.
+    use_position: bool = False
+    n_cells: int = 0            # grid size; set from the processed data when use_position
     sigreg_weight: float = 0.09  # LeWM default
     sigreg_knots: int = 17
     sigreg_proj: int = 1024
@@ -76,20 +85,38 @@ class ChunkEncoder(nn.Module):
         self.step_embed = nn.Linear(cfg.n_features, d)
         self.pos = nn.Parameter(torch.randn(1, cfg.chunk_len, d) * 0.02)
         self.vessel = nn.Embedding(cfg.n_vessel_classes, d)
+        if cfg.use_position and cfg.n_cells <= 0:
+            raise ValueError("use_position needs n_cells > 0")
+        self.place = nn.Embedding(cfg.n_cells, d) if cfg.use_position else None
         self.blocks = nn.ModuleList(
             Block(d, cfg.enc_heads, cfg.dim_head, cfg.enc_mlp, cfg.dropout) for _ in range(cfg.enc_depth)
         )
         self.norm = nn.LayerNorm(d)
+        if cfg.pooling not in ("mean", "attention"):
+            raise ValueError(f"unknown pooling {cfg.pooling!r}")
+        # Attention pooling scores each step, so a single anomalous step (a
+        # spoof's jump) can dominate the chunk embedding instead of being
+        # averaged away with seven normal steps.
+        self.pool_score = nn.Linear(d, 1) if cfg.pooling == "attention" else None
         self.projector = MLP(d, cfg.proj_hidden, d, norm="batch")
 
-    def forward(self, chunks: torch.Tensor, vclass: torch.Tensor) -> torch.Tensor:
-        """chunks: (B, T, C, F); vclass: (B,). Returns (B, T, D)."""
+    def forward(self, chunks: torch.Tensor, vclass: torch.Tensor, cells: torch.Tensor | None = None) -> torch.Tensor:
+        """chunks: (B, T, C, F); vclass: (B,); cells: (B, T) one grid cell per chunk. Returns (B, T, D)."""
         B, T, C, F = chunks.shape
         h = self.step_embed(chunks.reshape(B * T, C, F)) + self.pos
         h = h + self.vessel(vclass).repeat_interleave(T, dim=0)[:, None, :]
+        if self.place is not None:
+            if cells is None:
+                raise ValueError("position-context encoder needs cells")
+            h = h + self.place(cells.reshape(B * T))[:, None, :]
         for blk in self.blocks:
             h = blk(h)
-        h = self.norm(h).mean(dim=1)
+        h = self.norm(h)
+        if self.pool_score is None:
+            h = h.mean(dim=1)
+        else:
+            w = torch.softmax(self.pool_score(h).squeeze(-1), dim=1)
+            h = (w.unsqueeze(-1) * h).sum(dim=1)
         return self.projector(h).reshape(B, T, -1)
 
 
@@ -143,11 +170,18 @@ class LatentWake(nn.Module):
         c = self.cfg.chunk_len
         return x[:, : (L // c) * c].reshape(B, L // c, c, F)
 
-    def embed(self, x: torch.Tensor, vclass: torch.Tensor) -> torch.Tensor:
+    def chunk_cells(self, cells: torch.Tensor | None) -> torch.Tensor | None:
+        """(B, L) per-step cells -> (B, T) the cell at each chunk's first step."""
+        if cells is None or not self.cfg.use_position:
+            return None
+        c = self.cfg.chunk_len
+        return cells[:, : (cells.size(1) // c) * c : c].long()
+
+    def embed(self, x: torch.Tensor, vclass: torch.Tensor, cells: torch.Tensor | None = None) -> torch.Tensor:
         chunks = self.chunk(x)
         if self.encoder is None:
             return chunks.flatten(2)
-        return self.encoder(chunks, vclass)
+        return self.encoder(chunks, vclass, self.chunk_cells(cells))
 
     def actions(self, x: torch.Tensor) -> torch.Tensor:
         """Action for transition t is the reported kinematics of chunk t+1: (B, T-1, C*A)."""
@@ -156,8 +190,8 @@ class LatentWake(nn.Module):
 
     # ------------------------------------------------------------------ train
 
-    def forward(self, x: torch.Tensor, vclass: torch.Tensor) -> dict[str, torch.Tensor]:
-        z = self.embed(x, vclass)                      # (B, T, D)
+    def forward(self, x: torch.Tensor, vclass: torch.Tensor, cells: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+        z = self.embed(x, vclass, cells)               # (B, T, D)
         pred = self.predictor(z[:, :-1], self.actions(x))
         target = z[:, 1:]
         per_step = (pred - target).pow(2).mean(dim=-1)  # (B, T-1)
@@ -173,11 +207,11 @@ class LatentWake(nn.Module):
     # ------------------------------------------------------------- inference
 
     @torch.no_grad()
-    def surprise(self, x: torch.Tensor, vclass: torch.Tensor) -> torch.Tensor:
+    def surprise(self, x: torch.Tensor, vclass: torch.Tensor, cells: torch.Tensor | None = None) -> torch.Tensor:
         """Per-transition prediction error, (B, T-1). Transition t scores chunk t+1."""
         was = self.training
         self.eval()
-        out = self.forward(x, vclass)["per_step"]
+        out = self.forward(x, vclass, cells)["per_step"]
         self.train(was)
         return out
 

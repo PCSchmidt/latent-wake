@@ -1,8 +1,8 @@
 """Score a frozen test set with every method and report detection per anomaly cell.
 
 Usage:
-    python -m latentwake.evaluate --testset data/testsets/chesapeake-test-v1 \\
-        --processed data/processed/chesapeake --out reports/eval-v1 \\
+    python -m latentwake.evaluate --testset data/testsets/chesapeake-test-v2 \\
+        --processed data/processed/chesapeake --out reports/eval-v2 \\
         --model jepa=runs/jepa-s0/best.pt --model raw=runs/raw-s0/best.pt
 
 Methods always included: the physics residual and the Kalman filter. Each
@@ -11,7 +11,9 @@ Methods always included: the physics residual and the Kalman filter. Each
 
 Rules baked in:
   * Behavioral kinds (route deviation, loitering) are compared only against
-    normal windows from moving vessels. See inject/build.py for why.
+    normal windows from moving transit-class vessels, the population they are
+    injected into (contract v2). See inject/build.py for why.
+  * Every detector is calibrated per stratum, vessel class x under way.
   * AUPRC is reported next to AUROC: anomalies are rare in practice and AUROC
     alone flatters.
 
@@ -35,10 +37,10 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from latentwake.data.features import Normalizer
-from latentwake.data.preprocess import load_split
+from latentwake.data.features import FEATURES, Normalizer
+from latentwake.data.preprocess import load_cells, load_split
 from latentwake.inject.anomalies import NEEDS_MOTION
-from latentwake.inject.build import MOVING_SOG_KN, TestSet, load_test_set
+from latentwake.inject.build import MOVING_SOG_KN, TRANSIT_CLASSES, TestSet, load_test_set
 from latentwake.models.baselines import kalman_nis, physics_residual, window_score
 from latentwake.score import Calibrator
 
@@ -54,10 +56,17 @@ def cell_metrics(
     thresholds = thresholds or {}
     normal = cells.kind.to_numpy() == "normal"
     moving_normal = normal & (cells.source_mean_sog.to_numpy() >= MOVING_SOG_KN)
+    # Contract v2: behavioral kinds are injected only into moving transit-class
+    # windows, so they are compared only with normals from that population.
+    # Test sets built before v2 have no vessel class column and keep v1 behavior.
+    if "source_vessel_class" in cells:
+        behavioral_ref = moving_normal & np.isin(cells.source_vessel_class.to_numpy(), TRANSIT_CLASSES)
+    else:
+        behavioral_ref = moving_normal
     rows = []
     anomalous = cells[~normal]
     for (kind, level), g in anomalous.groupby(["kind", "level"], sort=True):
-        ref = moving_normal if kind in NEEDS_MOTION else normal
+        ref = behavioral_ref if kind in NEEDS_MOTION else normal
         idx_a = g.index.to_numpy()
         idx_n = np.flatnonzero(ref)
         y = np.r_[np.zeros(len(idx_n)), np.ones(len(idx_a))]
@@ -99,10 +108,26 @@ def baseline_scores(X: np.ndarray) -> dict[str, np.ndarray]:
     }
 
 
-def _window_z(val_scores, val_vclass, test_scores, test_vclass) -> np.ndarray:
-    """Robust z of window scores against validation windows of the same vessel class."""
-    cal = Calibrator.fit(np.asarray(val_scores)[:, None], val_vclass)
-    return cal.transform(np.asarray(test_scores)[:, None], test_vclass)[:, 0]
+UNDERWAY_SOG_KN = 1.0
+_SOG = FEATURES.index("sog_kn")
+
+
+def strata(vclass: np.ndarray, X_raw: np.ndarray) -> np.ndarray:
+    """Calibration stratum per window: vessel class x under way (contract v2).
+
+    Under way means the window's mean reported speed is at least 1 kn, read
+    from the observed (unnormalized) window, as a deployed system would. A
+    tanker at anchor and a tanker in the channel have different error scales;
+    pooling them inflates z-scores for the moving ones.
+    """
+    underway = np.asarray(X_raw)[..., _SOG].mean(axis=1) >= UNDERWAY_SOG_KN
+    return np.asarray(vclass, dtype=np.int64) * 2 + underway.astype(np.int64)
+
+
+def _window_z(val_scores, val_key, test_scores, test_key) -> np.ndarray:
+    """Robust z of window scores against validation windows of the same stratum."""
+    cal = Calibrator.fit(np.asarray(val_scores)[:, None], val_key)
+    return cal.transform(np.asarray(test_scores)[:, None], test_key)[:, 0]
 
 
 def model_scores(
@@ -111,12 +136,13 @@ def model_scores(
     processed: Path,
     fuse_with_kalman: str | None = None,
     kalman_val: np.ndarray | None = None,
+    X_val_raw: np.ndarray | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Calibrated window scores for each model (test, val), plus fused detectors if requested.
 
     Fusion rule (fixed before any real data; nothing in it is fit to a test set):
-    calibrate each detector's *window* score per vessel class on validation
-    windows (median and MAD), then take the larger of the JEPA's and Kalman's
+    calibrate each detector's *window* score per stratum (vessel class x under
+    way, see strata) on validation windows (median and MAD), then take the larger of the JEPA's and Kalman's
     z per window. Calibrating at the window level puts both on the same null
     scale even though one takes a max over 63 steps and the other over 7
     transitions. A model named PREFIX or PREFIX-sN, where PREFIX is
@@ -130,30 +156,45 @@ def model_scores(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     windows = pd.read_parquet(Path(processed) / "windows.parquet").set_index("window_id")
     vclass_test = windows.loc[ts.cells.source_window.to_numpy(), "vessel_class"].to_numpy()
-    Xn = Normalizer.load(Path(processed) / "normalizer.json").transform(ts.X)
-    Xv, meta_v = load_split(processed, "val")
+    normalizer = Normalizer.load(Path(processed) / "normalizer.json")
+    Xn = normalizer.transform(ts.X)
+    if X_val_raw is None:
+        X_val_raw, meta_v = load_split(processed, "val", normalized=False)
+    else:
+        meta_v = load_split(processed, "val")[1]
+    Xv = normalizer.transform(X_val_raw)
     vclass_val = meta_v.vessel_class.to_numpy()
+    key_test, key_val = strata(vclass_test, ts.X), strata(vclass_val, X_val_raw)
+    loc_val = loc_test = None  # loaded only if a model uses position
 
     kz_test = kz_val = None
     if fuse_with_kalman:
         if kalman_val is None:
-            kalman_val = window_score(kalman_nis(load_split(processed, "val", normalized=False)[0]))
+            kalman_val = window_score(kalman_nis(X_val_raw))
         kalman_test = window_score(kalman_nis(ts.X))
-        kz_test = _window_z(kalman_val, vclass_val, kalman_test, vclass_test)
-        kz_val = _window_z(kalman_val, vclass_val, kalman_val, vclass_val)
+        kz_test = _window_z(kalman_val, key_val, kalman_test, key_test)
+        kz_val = _window_z(kalman_val, key_val, kalman_val, key_val)
 
     test, val = {}, {}
     for name, ckpt in name_to_ckpt.items():
         model = load_model(Path(ckpt), device=device)
-        e_val = transition_errors(model, Xv, vclass_val)
-        e_test = transition_errors(model, Xn, vclass_test)
-        cal = Calibrator.fit(e_val, vclass_val)
-        test[name] = cal.transform(e_test, vclass_test).max(axis=1)
-        val[name] = cal.transform(e_val, vclass_val).max(axis=1)
+        if model.cfg.use_position:
+            if ts.loc is None:
+                raise ValueError(f"{name} uses position but the test set has no location cells; rebuild it (v2)")
+            if loc_val is None:
+                loc_val, loc_test = load_cells(processed, meta_v), ts.loc
+            cv, ct = loc_val, loc_test
+        else:
+            cv = ct = None
+        e_val = transition_errors(model, Xv, vclass_val, cells=cv)
+        e_test = transition_errors(model, Xn, vclass_test, cells=ct)
+        cal = Calibrator.fit(e_val, key_val)
+        test[name] = cal.transform(e_test, key_test).max(axis=1)
+        val[name] = cal.transform(e_val, key_val).max(axis=1)
         if kz_test is not None and (name == fuse_with_kalman or name.startswith(fuse_with_kalman + "-s")):
             fused = "fused" + name[len(fuse_with_kalman):]
-            test[fused] = np.maximum(_window_z(val[name], vclass_val, test[name], vclass_test), kz_test)
-            val[fused] = np.maximum(_window_z(val[name], vclass_val, val[name], vclass_val), kz_val)
+            test[fused] = np.maximum(_window_z(val[name], key_val, test[name], key_test), kz_test)
+            val[fused] = np.maximum(_window_z(val[name], key_val, val[name], key_val), kz_val)
     if fuse_with_kalman and not any(k.startswith("fused") for k in test):
         raise ValueError(f"fuse_with_kalman={fuse_with_kalman!r} matched no model name")
     return test, val
@@ -199,9 +240,11 @@ def run(
     out.mkdir(parents=True, exist_ok=True)
     ts = load_test_set(testset)
     scores = baseline_scores(ts.X)
-    val_scores = baseline_scores(load_split(processed, "val", normalized=False)[0])
+    X_val_raw = load_split(processed, "val", normalized=False)[0]
+    val_scores = baseline_scores(X_val_raw)
     if models:
-        t, v = model_scores(models, ts, processed, fuse_with_kalman, kalman_val=val_scores["kalman"])
+        t, v = model_scores(models, ts, processed, fuse_with_kalman, kalman_val=val_scores["kalman"],
+                            X_val_raw=X_val_raw)
         scores.update(t)
         val_scores.update(v)
     results = cell_metrics(ts.cells, scores, alert_thresholds(val_scores, alert_fpr))

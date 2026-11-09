@@ -119,6 +119,14 @@ def check_preprocessing(processed: Path, min_train_windows: int = 1000) -> None:
     _need(np.isfinite(X).all(), "non-finite values in training windows")
     _need(X.shape[-1] == len(FEATURES), "window feature count does not match FEATURES")
     _ok(f"{n_train:,} train / {stats['windows']['val']:,} val / {stats['windows']['test']:,} test windows, all finite")
+    # Contract v2: the main study is Class A transceivers only, with location cells.
+    _need(stats.get("config", {}).get("transceivers") == ["A"],
+          "processed data is not filtered to Class A transceivers (contract v2); rerun preprocessing")
+    import pyarrow.parquet as pq
+
+    _need("cell" in pq.read_schema(p / "tracks.parquet").names,
+          "tracks have no location cell column (contract v2); rerun preprocessing")
+    _ok("population is Class A only; location cells present")
 
 
 # -------------------------------------------------------------------- splits
@@ -157,6 +165,17 @@ def check_testset(testset: Path, processed: Path) -> None:
     splits = set(w.loc[src, "split"])
     _need(splits <= {"test"}, f"test set draws from split(s) {sorted(splits)}, expected only 'test'")
     _ok("every window comes from the held-out test split")
+    # Contract v2: behavioral kinds only in moving transit-class windows, and
+    # location cells carried for position-context models.
+    from latentwake.inject.anomalies import NEEDS_MOTION
+    from latentwake.inject.build import TRANSIT_CLASSES
+
+    _need("source_vessel_class" in ts.cells, "test set has no source_vessel_class (built before contract v2); rebuild")
+    beh = ts.cells.kind.isin(sorted(NEEDS_MOTION)).to_numpy()
+    _need(np.isin(ts.cells.source_vessel_class.to_numpy()[beh], TRANSIT_CLASSES).all(),
+          "behavioral anomalies injected outside the transit classes (cargo, tanker, passenger)")
+    _need(ts.loc is not None, "test set has no location cells (built before contract v2); rebuild")
+    _ok("behavioral anomalies only in transit vessels; location cells present")
 
 
 # ------------------------------------------------------------------ training

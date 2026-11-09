@@ -124,7 +124,9 @@ def _toy_pool(n=120, seed=0):
     raw = {f: np.stack([r[f] for r in raws]) for f in raws[0]}
     X = np.stack([step_features(*(r[f] for f in ("lat", "lon", "sog", "cog", "heading"))) for r in raws])
     X[:, 0] = 0.0  # stand in for the pre-window displacement
-    meta = pd.DataFrame({"window_id": np.arange(n), "mean_sog": raw["sog"].mean(axis=1)})
+    # Alternate cargo (1) and tug_tow (5): only the cargo half may take behavioral anomalies.
+    meta = pd.DataFrame({"window_id": np.arange(n), "mean_sog": raw["sog"].mean(axis=1),
+                         "vessel_class": np.where(np.arange(n) % 2 == 0, 1, 5)})
     return X.astype(np.float32), raw, meta
 
 
@@ -156,3 +158,35 @@ def test_freeze_detects_tampering_and_refuses_overwrite(tmp_path):
     cells.to_csv(tmp_path / "v1" / "cells.csv", index=False)
     with pytest.raises(ValueError, match="checksum"):
         load_test_set(tmp_path / "v1")
+
+
+def test_behavioral_kinds_only_in_moving_transit_vessels():
+    from latentwake.inject.build import TRANSIT_CLASSES
+
+    X, raw, meta = _toy_pool(n=160)
+    ts = build_test_set(X, raw, meta, seed=0, per_cell=4, n_normal=40)
+    beh = ts.cells.kind.isin(["route_deviation", "loitering"])
+    assert beh.any()
+    assert ts.cells[beh].source_vessel_class.isin(TRANSIT_CLASSES).all()
+    kin = ts.cells.kind.isin(["position_spoof", "teleport", "ais_gap"])
+    assert (ts.cells[kin].source_vessel_class == 5).any()  # kinematic kinds still hit every class
+
+
+def test_location_cells_follow_injected_positions_and_are_checksummed(tmp_path):
+    from latentwake.data.regions import get_region
+
+    region = get_region("chesapeake")
+    X, raw, meta = _toy_pool()
+    loc = region.cell_index(raw["lat"], raw["lon"])
+    ts = build_test_set(X, raw, meta, seed=2, per_cell=3, n_normal=20, loc=loc,
+                        cell_fn=lambda la, lo: region.cell_index(la, lo))
+    assert ts.loc.shape == ts.step_label.shape and ts.loc.dtype == np.int32
+    normal = (ts.cells.kind == "normal").to_numpy()
+    np.testing.assert_array_equal(ts.loc[normal], loc[ts.cells[normal].source_window.to_numpy()])
+    save_test_set(ts, tmp_path / "v2")
+    np.testing.assert_array_equal(load_test_set(tmp_path / "v2").loc, ts.loc)
+    arrays = dict(np.load(tmp_path / "v2" / "arrays.npz"))
+    arrays["loc"] = arrays["loc"] + 1
+    np.savez_compressed(tmp_path / "v2" / "arrays.npz", **arrays)
+    with pytest.raises(ValueError, match="checksum"):
+        load_test_set(tmp_path / "v2")

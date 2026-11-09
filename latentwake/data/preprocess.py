@@ -37,6 +37,7 @@ import pandas as pd
 
 from latentwake.data.features import FEATURES, RAW_FIELDS, Normalizer, step_features, vessel_class
 from latentwake.data.geo import KNOTS_TO_MPS, circular_interp, course_from_xy, step_displacement
+from latentwake.data.regions import get_region
 
 log = logging.getLogger("latentwake.preprocess")
 
@@ -56,6 +57,11 @@ class PreprocessConfig:
     split_cutoff: str | None = None   # ISO date; None = two-thirds through the data
     holdout_frac: float = 0.3         # share of vessels never used for training
     split_seed: int = 0
+    region: str = "chesapeake"        # location grid for the optional position context
+    cell_deg: float = 0.05            # grid cell size, degrees (about 5 km)
+    # Main-study population (contract v2): Class A transceivers, the commercial
+    # vessels US rules require to carry AIS. None keeps every transceiver class.
+    transceivers: tuple[str, ...] | None = ("A",)
     extra: dict = field(default_factory=dict)
 
 
@@ -67,7 +73,8 @@ def load_interim(interim_dir: Path) -> pd.DataFrame:
         raise FileNotFoundError(f"no ais-*.parquet files in {interim_dir}")
     pattern = (Path(interim_dir) / "ais-*.parquet").as_posix()
     df = duckdb.sql(
-        "SELECT mmsi, base_date_time AS t, latitude AS lat, longitude AS lon, sog, cog, heading, vessel_type "
+        "SELECT mmsi, base_date_time AS t, latitude AS lat, longitude AS lon, sog, cog, heading, vessel_type, "
+        "transceiver "
         f"FROM read_parquet('{pattern}')"
     ).df()
     log.info("loaded %d rows from %d files", len(df), len(files))
@@ -98,6 +105,9 @@ def clean(df: pd.DataFrame, cfg: PreprocessConfig) -> tuple[pd.DataFrame, dict]:
     # and placeholder IDs fall outside that range.
     df = df[(df.mmsi >= 200_000_000) & (df.mmsi <= 799_999_999)]
     stats["after_mmsi"] = int(len(df))
+    if cfg.transceivers is not None and "transceiver" in df:
+        df = df[df.transceiver.isin(list(cfg.transceivers))]
+        stats["after_transceiver"] = int(len(df))
 
     df = df[df.lat.between(-90, 90) & df.lon.between(-180, 180)]
     # NOAA "not available" sentinels become missing values, not rows to drop.
@@ -275,6 +285,8 @@ def resample(points: pd.DataFrame, cfg: PreprocessConfig) -> pd.DataFrame:
     )
     for i, name in enumerate(FEATURES):
         out[name] = cat["feats"][:, i]
+    # Location grid cell per step, for the optional position context.
+    out["cell"] = get_region(cfg.region).cell_index(out.lat.to_numpy(), out.lon.to_numpy(), cfg.cell_deg)
     return out
 
 
@@ -381,6 +393,22 @@ def load_split(processed_dir: Path, split: str, normalized: bool = True, raw: bo
     return X, meta, {f: R[..., i] for i, f in enumerate(RAW_FIELDS)}
 
 
+def load_cells(processed_dir: Path, meta: pd.DataFrame) -> np.ndarray:
+    """Per-step location cells (N, L) for the windows in meta; zeros if the data predates cells."""
+    processed_dir = Path(processed_dir)
+    cfg = PreprocessConfig(**json.loads((processed_dir / "stats.json").read_text())["config"])
+    try:
+        cell = pd.read_parquet(processed_dir / "tracks.parquet", columns=["cell"]).cell.to_numpy()
+    except (KeyError, ValueError):
+        return np.zeros((len(meta), cfg.window_len), dtype=np.int32)
+    return cell[meta.row0.to_numpy()[:, None] + np.arange(cfg.window_len)].astype(np.int32)
+
+
+def grid_size(processed_dir: Path) -> int:
+    cfg = PreprocessConfig(**json.loads((Path(processed_dir) / "stats.json").read_text())["config"])
+    return get_region(cfg.region).n_cells(cfg.cell_deg)
+
+
 # ---------------------------------------------------------------------- run
 
 def run(interim_dir: Path, out_dir: Path, cfg: PreprocessConfig | None = None) -> dict:
@@ -445,9 +473,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", type=Path, default=Path("data/processed/chesapeake"))
     p.add_argument("--split-cutoff", default=None, help="ISO date; default is two-thirds through the data")
     p.add_argument("--holdout-frac", type=float, default=0.3)
+    p.add_argument("--transceivers", default="A",
+                   help="comma-separated transceiver classes to keep, or 'all' (the main study is A only; "
+                        "write other populations to a different --out)")
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
-    run(a.interim, a.out, PreprocessConfig(split_cutoff=a.split_cutoff, holdout_frac=a.holdout_frac))
+    tx = None if a.transceivers == "all" else tuple(t.strip() for t in a.transceivers.split(","))
+    run(a.interim, a.out, PreprocessConfig(split_cutoff=a.split_cutoff, holdout_frac=a.holdout_frac, transceivers=tx))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ Usage:
     python -m latentwake.train ... --target raw            # ablation: no encoder, no SIGReg
     python -m latentwake.train ... --no-action             # ablation: no action conditioning
     python -m latentwake.train ... --sigreg-weight 0       # ablation: expect collapse
+    python -m latentwake.train ... --use-position          # option: location-cell context
 
 Each run folder gets config.json, metrics.jsonl (one line per epoch), last.pt,
 and best.pt (lowest validation loss). Watch `val_erank` in the log: the
@@ -26,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from latentwake.data.preprocess import load_split
+from latentwake.data.preprocess import grid_size, load_cells, load_split
 from latentwake.models.jepa import LatentWake, ModelConfig, collapse_signal, effective_rank
 
 
@@ -71,14 +72,15 @@ def _subsample_stationary(meta, keep: float, rng: np.random.Generator) -> np.nda
 
 
 @torch.no_grad()
-def _validate(model, Xv, Vv, cfg: TrainConfig, device) -> dict:
+def _validate(model, Xv, Vv, Cv, cfg: TrainConfig, device) -> dict:
     model.eval()
     preds, sigs, zs = [], [], []
     for a in range(0, len(Xv), cfg.batch_size):
         x = Xv[a : a + cfg.batch_size].to(device)
         v = Vv[a : a + cfg.batch_size].to(device)
+        c = Cv[a : a + cfg.batch_size].to(device) if Cv is not None else None
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=cfg.amp and device.type == "cuda"):
-            out = model(x, v)
+            out = model(x, v, c)
         preds.append(float(out["pred_loss"]) * len(x))
         sigs.append(float(out["sigreg_loss"]) * len(x))
         zs.append(out["z"].float().cpu())
@@ -103,7 +105,6 @@ def train(cfg: TrainConfig, log=None) -> list[dict]:
     out = Path(cfg.out)
     out.mkdir(parents=True, exist_ok=True)
     started_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
-    (out / "config.json").write_text(json.dumps({**asdict(cfg), "started_at": started_at}, indent=2))
 
     X, meta = load_split(cfg.processed, "train")
     keep = _subsample_stationary(meta, cfg.stationary_keep, rng)
@@ -115,9 +116,23 @@ def train(cfg: TrainConfig, log=None) -> list[dict]:
         Xv_np, meta_v = Xv_np[pick], meta_v.iloc[pick]
     Xv = torch.from_numpy(Xv_np)
     Vv = torch.from_numpy(meta_v.vessel_class.to_numpy().astype(np.int64))
+    Ct = Cv = None
+    if cfg.model.use_position:
+        n = grid_size(cfg.processed)
+        if cfg.model.n_cells not in (0, n):
+            raise ValueError(f"model n_cells={cfg.model.n_cells} but the processed grid has {n}")
+        cfg.model.n_cells = n
+        cells = load_cells(cfg.processed, meta)
+        if not cells.any():
+            raise ValueError("processed data has no location cells; rerun preprocessing (contract v2)")
+        Ct = torch.from_numpy(cells[keep])
+        Cv = torch.from_numpy(load_cells(cfg.processed, meta_v))
+    if len(Xv) == 0:
+        raise ValueError("no validation windows; check the split or the population filter")
     if len(Xt) < cfg.batch_size:
         raise ValueError(f"only {len(Xt)} training windows; lower --batch-size")
 
+    (out / "config.json").write_text(json.dumps({**asdict(cfg), "started_at": started_at}, indent=2))
     model = LatentWake(cfg.model).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     steps_per_epoch = len(Xt) // cfg.batch_size
@@ -135,10 +150,11 @@ def train(cfg: TrainConfig, log=None) -> list[dict]:
         for b in range(steps_per_epoch):
             idx = perm[b * cfg.batch_size : (b + 1) * cfg.batch_size]
             x, v = Xt[idx].to(device, non_blocking=True), Vt[idx].to(device, non_blocking=True)
+            c = Ct[idx].to(device, non_blocking=True) if Ct is not None else None
             for g in opt.param_groups:
                 g["lr"] = _lr_at(step, total, cfg)
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=cfg.amp and device.type == "cuda"):
-                o = model(x, v)
+                o = model(x, v, c)
             opt.zero_grad(set_to_none=True)
             o["loss"].backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
@@ -148,7 +164,7 @@ def train(cfg: TrainConfig, log=None) -> list[dict]:
             sums["sigreg"] += o["sigreg_loss"].item()
             sums["loss"] += o["loss"].item()
         rec = {"epoch": epoch, "step": step, **{f"train_{k}": v / steps_per_epoch for k, v in sums.items()}}
-        rec.update(_validate(model, Xv, Vv, cfg, device))
+        rec.update(_validate(model, Xv, Vv, Cv, cfg, device))
         rec["lr"] = _lr_at(step - 1, total, cfg)
         rec["seconds"] = round(time.perf_counter() - t0, 1)
         if model.encoder is not None:
@@ -185,6 +201,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--size", choices=["full", "small"], default="full")
     p.add_argument("--target", choices=["latent", "raw"], default="latent")
     p.add_argument("--no-action", action="store_true")
+    p.add_argument("--pooling", choices=["mean", "attention"], default="mean")
+    p.add_argument("--use-position", action="store_true", help="add a location-cell embedding (contract v2 option)")
+    p.add_argument("--chunk-len", type=int, default=8, help="steps per chunk; must divide 64")
     p.add_argument("--sigreg-weight", type=float, default=0.09)
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=256)
@@ -193,7 +212,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto")
     a = p.parse_args(argv)
-    mk = dict(target=a.target, use_action=not a.no_action, sigreg_weight=a.sigreg_weight)
+    if 64 % a.chunk_len:
+        p.error("--chunk-len must divide the 64-step window")
+    mk = dict(target=a.target, use_action=not a.no_action, sigreg_weight=a.sigreg_weight,
+              pooling=a.pooling, chunk_len=a.chunk_len, use_position=a.use_position)
     model_cfg = ModelConfig.small(**mk) if a.size == "small" else ModelConfig(**mk)
     cfg = TrainConfig(
         processed=a.processed, out=a.out, model=model_cfg, epochs=a.epochs, batch_size=a.batch_size,
