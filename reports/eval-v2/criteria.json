@@ -1,0 +1,53 @@
+{
+  "all_passed": false,
+  "failed": [
+    "behavioral_gain_over_kalman_auroc",
+    "fused_beats_kalman_auroc",
+    "behavioral_gain_over_kalman_auprc",
+    "fused_no_precision_loss_vs_kalman_auprc",
+    "fused_false_alarms_within_2x_budget"
+  ],
+  "criteria": [
+    {
+      "id": "behavioral_gain_over_kalman_auroc",
+      "passed": false,
+      "detail": "jepa 0.807 vs kalman 0.737 (margin +0.100)"
+    },
+    {
+      "id": "fused_beats_kalman_auroc",
+      "passed": false,
+      "detail": "fused 0.872 vs kalman 0.853 (margin +0.030)"
+    },
+    {
+      "id": "fused_beats_jepa_auroc",
+      "passed": true,
+      "detail": "fused 0.872 vs jepa 0.832 (margin +0.030)"
+    },
+    {
+      "id": "behavioral_gain_over_kalman_auprc",
+      "passed": false,
+      "detail": "jepa 0.760 vs kalman 0.721 (margin +0.050)"
+    },
+    {
+      "id": "fused_no_precision_loss_vs_kalman_auprc",
+      "passed": false,
+      "detail": "fused 0.643 vs kalman 0.704 (margin +0.000)"
+    },
+    {
+      "id": "fused_beats_jepa_auprc",
+      "passed": true,
+      "detail": "fused 0.643 vs jepa 0.526 (margin +0.030)"
+    },
+    {
+      "id": "fused_false_alarms_within_2x_budget",
+      "passed": false,
+      "detail": "fused 0.0408 (needs <= 0.0200)"
+    },
+    {
+      "id": "fused_detects_at_least_kalman_at_budget",
+      "passed": true,
+      "detail": "fused 0.501 vs kalman 0.483 (margin +0.000)"
+    }
+  ],
+  "contract_sha256": "913e5724e781d4cae428d6d70a5db135a333086303df95e7de6d8405e1ce3b14"
+}

@@ -1,0 +1,16 @@
+{
+  "testset": "data/testsets/chesapeake-test-v2",
+  "testset_sha256": "826137bdb5260a1d049ac1b8859b36d16043c3ac5b132570a7f4ff39dede8aa7",
+  "checkpoints": {
+    "jepa-s0": "862eb8722747647bf4c50b32374e922869e84031cf34031ef7581ea69aa0cf6c",
+    "jepa-s1": "a768866e48f630f0b5a8a55518d082276536c5d787c277258f5bea3931caf096",
+    "jepa-s2": "80b22816d75f7d83c0d4d52fd4042f4ae4950d47e3684d32c651205402a555b1",
+    "raw-s0": "e33db07915a84cfe95d76a8143f3d07add7745e9fa79793a1f92920ea4f32e5a",
+    "raw-s1": "4cc08f37536dc0c6717506717b16596d0b4c08388693ec74c8b9f30e87c2e25b",
+    "raw-s2": "394fb081bb25a9f4283ea502433012cab0715ccd2fc06827c7d84da247704319"
+  },
+  "fuse_with_kalman": "jepa",
+  "alert_fpr": 0.01,
+  "calibration": "tail",
+  "scored_at": "2026-11-09T22:42:12+00:00"
+}
