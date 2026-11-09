@@ -165,6 +165,7 @@ def test_train_and_evaluate_end_to_end(tmp_path):
     assert set(res.method) == {"physics", "kalman", "jepa-s0", "jepa-s1", "fused-s0", "fused-s1"}
     normals = res[res.kind == "normal"]
     assert len(normals) == 6 and normals.fpr_at_budget.between(0, 1).all()
+    assert normals.fpr_at_budget_moving.dropna().between(0, 1).all()
     assert res[res.kind != "normal"].detect_at_budget.between(0, 1).all()
     with pytest.raises(ValueError, match="matched no model"):
         evaluate(tmp_path / "ts", tmp_path / "processed", models, tmp_path / "eval2", fuse_with_kalman="nope")

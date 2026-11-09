@@ -82,6 +82,10 @@ def cell_metrics(
                 "method": method, "kind": "normal", "level": -1, "params": "{}",
                 "n_anomalous": 0, "n_normal": int(normal.sum()),
                 "fpr_at_budget": float(np.mean(scores[method][normal] > thr)),
+                # Reported, not gated: most normals are anchored ships, which rarely
+                # alert, so the overall rate can flatter vessels under way.
+                "fpr_at_budget_moving": float(np.mean(scores[method][moving_normal] > thr))
+                if moving_normal.any() else np.nan,
             }
         )
     return pd.DataFrame(rows)
@@ -172,10 +176,12 @@ def summarize(results: pd.DataFrame) -> str:
     )
     if "detect_at_budget" in anom and anom.detect_at_budget.notna().any():
         det = anom.groupby(["kind", "method"]).detect_at_budget.mean().unstack().round(3)
-        fpr = results[results.kind == "normal"].set_index("method").fpr_at_budget.round(4)
+        normals = results[results.kind == "normal"].set_index("method")
+        cols = [c for c in ("fpr_at_budget", "fpr_at_budget_moving") if c in normals]
+        fpr = normals[cols].round(4).rename(columns={"fpr_at_budget": "all normals", "fpr_at_budget_moving": "moving only"})
         text += (
             "\n## Operating point (threshold from validation)\n\n"
-            + "Test false-alarm rate:\n\n" + fpr.to_frame().T.to_markdown(index=False)
+            + "False-alarm rate:\n\n" + fpr.T.to_markdown()
             + "\n\nShare detected, by kind (mean over severity levels):\n\n" + det.to_markdown() + "\n"
         )
     return text
