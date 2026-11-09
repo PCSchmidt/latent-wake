@@ -7,6 +7,8 @@ Usage:
     python -m latentwake.train ... --no-action             # ablation: no action conditioning
     python -m latentwake.train ... --sigreg-weight 0       # ablation: expect collapse
     python -m latentwake.train ... --use-position          # option: location-cell context
+    python -m latentwake.train ... --window-len 32         # ablation: shorter context
+    python -m latentwake.train ... --embed-dim 64          # ablation: smaller latent
 
 Each run folder gets config.json, metrics.jsonl (one line per epoch), last.pt,
 and best.pt (lowest validation loss). Watch `val_erank` in the log: the
@@ -207,6 +209,9 @@ def main(argv: list[str] | None = None) -> None:
                    help="with --use-position: share of training windows trained without location")
     p.add_argument("--chunk-len", type=int, default=8, help="steps per chunk; must divide 64")
     p.add_argument("--sigreg-weight", type=float, default=0.09)
+    p.add_argument("--embed-dim", type=int, default=None, help="latent size (ablation); default 192 (64 for --size small)")
+    p.add_argument("--window-len", type=int, default=64, choices=[16, 32, 64],
+                   help="context in steps (ablation); 64-step data windows are cut into consecutive model windows")
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--lr", type=float, default=3e-4)
@@ -214,11 +219,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto")
     a = p.parse_args(argv)
-    if 64 % a.chunk_len:
-        p.error("--chunk-len must divide the 64-step window")
+    if a.window_len % a.chunk_len:
+        p.error("--chunk-len must divide --window-len")
     mk = dict(target=a.target, use_action=not a.no_action, sigreg_weight=a.sigreg_weight,
               pooling=a.pooling, chunk_len=a.chunk_len, use_position=a.use_position,
-              position_dropout=a.position_dropout)
+              position_dropout=a.position_dropout, window_len=a.window_len)
+    if a.embed_dim is not None:
+        mk["embed_dim"] = a.embed_dim
     model_cfg = ModelConfig.small(**mk) if a.size == "small" else ModelConfig(**mk)
     cfg = TrainConfig(
         processed=a.processed, out=a.out, model=model_cfg, epochs=a.epochs, batch_size=a.batch_size,

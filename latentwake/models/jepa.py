@@ -198,11 +198,33 @@ class LatentWake(nn.Module):
 
     # ------------------------------------------------------------------ train
 
+    def fold(self, x, vclass, cells=None):
+        """Cut each input window into consecutive model windows of cfg.window_len steps.
+
+        Data windows are 64 steps. A model with a shorter context (the
+        context-length ablation) sees each data window as k independent
+        windows, so every step is still scored and none is dropped.
+        """
+        B, L, F = x.shape
+        W = self.cfg.window_len
+        if L == W:
+            return x, vclass, cells, 1
+        if L % W:
+            raise ValueError(f"input length {L} is not a multiple of window_len {W}")
+        k = L // W
+        x = x.reshape(B * k, W, F)
+        vclass = vclass.repeat_interleave(k)
+        if cells is not None:
+            cells = cells.reshape(B * k, W)
+        return x, vclass, cells, k
+
     def forward(self, x: torch.Tensor, vclass: torch.Tensor, cells: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
-        z = self.embed(x, vclass, cells)               # (B, T, D)
+        B = x.size(0)
+        x, vclass, cells, k = self.fold(x, vclass, cells)
+        z = self.embed(x, vclass, cells)               # (B*k, T, D)
         pred = self.predictor(z[:, :-1], self.actions(x))
         target = z[:, 1:]
-        per_step = (pred - target).pow(2).mean(dim=-1)  # (B, T-1)
+        per_step = (pred - target).pow(2).mean(dim=-1).reshape(B, -1)  # (B, k*(T-1))
         out = {"pred_loss": per_step.mean(), "per_step": per_step, "z": z}
         if self.encoder is not None and self.cfg.sigreg_weight > 0:
             out["sigreg_loss"] = self.sigreg(z.transpose(0, 1))
