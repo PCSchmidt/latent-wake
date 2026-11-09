@@ -17,6 +17,12 @@ calibration: tail   # contract v2.1: per-stratum validation tail probability for
 
 # Models scored by run-benchmark.sh. Name seeds METHOD-sN so the contract
 # check averages them (for example jepa-s0, jepa-s1, jepa-s2).
-models: {}
+models:
+  jepa-s0: runs/jepa-s0/best.pt
+  jepa-s1: runs/jepa-s1/best.pt
+  jepa-s2: runs/jepa-s2/best.pt
+  raw-s0: runs/raw-s0/best.pt
+  raw-s1: runs/raw-s1/best.pt
+  raw-s2: runs/raw-s2/best.pt
 #  jepa-s0: runs/jepa-s0/best.pt
 #  raw-s0: runs/raw-s0/best.pt
