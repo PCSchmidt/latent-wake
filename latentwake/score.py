@@ -86,6 +86,72 @@ class Calibrator:
                    tuple(d["pooled"]), d["min_count"])
 
 
+@dataclass
+class TailCalibrator:
+    """Map window scores to validation tail probabilities per stratum: -log10 P(score >= s).
+
+    Unlike a median/MAD z-score, this does not depend on the spread of the
+    bulk: a stratum whose normal scores are nearly constant (an anchored ship)
+    cannot inflate its scores, because only rank against that stratum's own
+    validation windows counts. Under the null every stratum's tail
+    probabilities are uniform, so a shared threshold spreads alerts across
+    strata in proportion to their size.
+
+    Up to the stratum's largest validation score: the empirical survival
+    function. Beyond it: an exponential tail whose scale is fit to the
+    exceedances over the 95th percentile (peaks over threshold), so scores
+    beyond anything seen in validation still rank. The tail scale
+    is floored at a tenth of the all-window tail scale, so a stratum whose
+    top scores are tied cannot make a tiny excess look enormous. Strata with
+    fewer than min_count windows fall back to the under-way/stopped group,
+    then to all windows.
+    """
+
+    tables: dict  # key -> (sorted values, u, scale)
+    tail_frac: float = 0.05
+    min_count: int = 200
+
+    @staticmethod
+    def _table(v: np.ndarray, tail_frac: float, floor: float = 1e-9):
+        v = np.sort(np.asarray(v, dtype=np.float64))
+        u = float(np.quantile(v, 1.0 - tail_frac))
+        exc = v[v > u] - u
+        scale = float(max(exc.mean() if exc.size else 0.0, floor, 1e-9))
+        return v, u, scale
+
+    @classmethod
+    def fit(cls, scores: np.ndarray, key: np.ndarray, tail_frac: float = 0.05, min_count: int = 200):
+        scores, key = np.asarray(scores, dtype=np.float64), np.asarray(key, dtype=np.int64)
+        tables = {("all",): cls._table(scores, tail_frac)}
+        floor = 0.1 * tables[("all",)][2]
+        for g in np.unique(key % 2):
+            sel = key % 2 == g
+            if sel.sum() >= min_count:
+                tables[("uw", int(g))] = cls._table(scores[sel], tail_frac, floor)
+        for k in np.unique(key):
+            sel = key == k
+            if sel.sum() >= min_count:
+                tables[("s", int(k))] = cls._table(scores[sel], tail_frac, floor)
+        return cls(tables, tail_frac, min_count)
+
+    def _lookup(self, k: int):
+        return self.tables.get(("s", k)) or self.tables.get(("uw", k % 2)) or self.tables[("all",)]
+
+    def transform(self, scores: np.ndarray, key: np.ndarray) -> np.ndarray:
+        scores, key = np.asarray(scores, dtype=np.float64), np.asarray(key, dtype=np.int64)
+        out = np.empty(len(scores))
+        for k in np.unique(key):
+            sel = key == k
+            v, u, scale = self._lookup(int(k))
+            s = scores[sel]
+            n = len(v)
+            body = -np.log10((n - np.searchsorted(v, s, side="left") + 1) / (n + 1))
+            # Past the largest validation score: P = exp(-(s - max)/scale) / (n + 1), in log space.
+            tail = np.log10(n + 1) + (s - v[-1]) / (scale * np.log(10))
+            out[sel] = np.where(s > v[-1], tail, body)
+        return out
+
+
 def step_scores(z: np.ndarray, chunk_len: int, window_len: int) -> np.ndarray:
     """Spread transition scores over the steps of the chunk each one predicts; chunk 0 gets 0."""
     out = np.zeros((len(z), window_len), dtype=np.float32)

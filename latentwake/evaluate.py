@@ -42,7 +42,7 @@ from latentwake.data.preprocess import load_cells, load_split
 from latentwake.inject.anomalies import NEEDS_MOTION
 from latentwake.inject.build import MOVING_SOG_KN, TRANSIT_CLASSES, TestSet, load_test_set
 from latentwake.models.baselines import kalman_nis, physics_residual, window_score
-from latentwake.score import Calibrator
+from latentwake.score import Calibrator, TailCalibrator
 
 
 def cell_metrics(
@@ -124,10 +124,25 @@ def strata(vclass: np.ndarray, X_raw: np.ndarray) -> np.ndarray:
     return np.asarray(vclass, dtype=np.int64) * 2 + underway.astype(np.int64)
 
 
-def _window_z(val_scores, val_key, test_scores, test_key) -> np.ndarray:
-    """Robust z of window scores against validation windows of the same stratum."""
+CALIBRATIONS = ("mad", "tail")
+
+
+def _window_z(val_scores, val_key, test_scores, test_key, calibration: str = "mad") -> np.ndarray:
+    """Window scores on a common null scale, fit on validation windows of the same stratum.
+
+    "mad": robust z (median and MAD), the contract v2 rule. "tail": -log10 of
+    the validation tail probability (TailCalibrator), which a nearly constant
+    stratum cannot inflate.
+    """
+    if calibration == "tail":
+        return TailCalibrator.fit(val_scores, val_key).transform(test_scores, test_key)
     cal = Calibrator.fit(np.asarray(val_scores)[:, None], val_key)
     return cal.transform(np.asarray(test_scores)[:, None], test_key)[:, 0]
+
+
+def test_vessel_class(ts: TestSet, processed: Path) -> np.ndarray:
+    windows = pd.read_parquet(Path(processed) / "windows.parquet", columns=["window_id", "vessel_class"])
+    return windows.set_index("window_id").loc[ts.cells.source_window.to_numpy(), "vessel_class"].to_numpy()
 
 
 def model_scores(
@@ -137,6 +152,7 @@ def model_scores(
     fuse_with_kalman: str | None = None,
     kalman_val: np.ndarray | None = None,
     X_val_raw: np.ndarray | None = None,
+    calibration: str = "mad",
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Calibrated window scores for each model (test, val), plus fused detectors if requested.
 
@@ -145,7 +161,8 @@ def model_scores(
     way, see strata) on validation windows (median and MAD), then take the larger of the JEPA's and Kalman's
     z per window. Calibrating at the window level puts both on the same null
     scale even though one takes a max over 63 steps and the other over 7
-    transitions. A model named PREFIX or PREFIX-sN, where PREFIX is
+    transitions. With calibration="tail", window scores are validation tail
+    probabilities instead (see _window_z), for every detector. A model named PREFIX or PREFIX-sN, where PREFIX is
     fuse_with_kalman, yields a fused detector named fused or fused-sN.
     """
     import torch
@@ -154,8 +171,9 @@ def model_scores(
     from latentwake.train import load_model
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    windows = pd.read_parquet(Path(processed) / "windows.parquet").set_index("window_id")
-    vclass_test = windows.loc[ts.cells.source_window.to_numpy(), "vessel_class"].to_numpy()
+    if calibration not in CALIBRATIONS:
+        raise ValueError(f"calibration must be one of {CALIBRATIONS}")
+    vclass_test = test_vessel_class(ts, processed)
     normalizer = Normalizer.load(Path(processed) / "normalizer.json")
     Xn = normalizer.transform(ts.X)
     if X_val_raw is None:
@@ -172,8 +190,8 @@ def model_scores(
         if kalman_val is None:
             kalman_val = window_score(kalman_nis(X_val_raw))
         kalman_test = window_score(kalman_nis(ts.X))
-        kz_test = _window_z(kalman_val, key_val, kalman_test, key_test)
-        kz_val = _window_z(kalman_val, key_val, kalman_val, key_val)
+        kz_test = _window_z(kalman_val, key_val, kalman_test, key_test, calibration)
+        kz_val = _window_z(kalman_val, key_val, kalman_val, key_val, calibration)
 
     test, val = {}, {}
     for name, ckpt in name_to_ckpt.items():
@@ -191,10 +209,14 @@ def model_scores(
         cal = Calibrator.fit(e_val, key_val)
         test[name] = cal.transform(e_test, key_test).max(axis=1)
         val[name] = cal.transform(e_val, key_val).max(axis=1)
+        mz_test = _window_z(val[name], key_val, test[name], key_test, calibration)
+        mz_val = _window_z(val[name], key_val, val[name], key_val, calibration)
         if kz_test is not None and (name == fuse_with_kalman or name.startswith(fuse_with_kalman + "-s")):
             fused = "fused" + name[len(fuse_with_kalman):]
-            test[fused] = np.maximum(_window_z(val[name], key_val, test[name], key_test), kz_test)
-            val[fused] = np.maximum(_window_z(val[name], key_val, val[name], key_val), kz_val)
+            test[fused] = np.maximum(mz_test, kz_test)
+            val[fused] = np.maximum(mz_val, kz_val)
+        if calibration == "tail":
+            test[name], val[name] = mz_test, mz_val
     if fuse_with_kalman and not any(k.startswith("fused") for k in test):
         raise ValueError(f"fuse_with_kalman={fuse_with_kalman!r} matched no model name")
     return test, val
@@ -268,6 +290,7 @@ def run(
     out: Path,
     fuse_with_kalman: str | None = None,
     alert_fpr: float = 0.01,
+    calibration: str = "mad",
 ) -> pd.DataFrame:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -275,15 +298,23 @@ def run(
     scores = baseline_scores(ts.X)
     X_val_raw, meta_val = load_split(processed, "val", normalized=False)
     val_scores = baseline_scores(X_val_raw)
+    key_val = strata(meta_val.vessel_class.to_numpy(), X_val_raw)
+    raw_kalman_val = val_scores["kalman"]
+    if calibration == "tail":
+        # Every detector, baselines included, gets the same per-stratum calibration.
+        key_test = strata(test_vessel_class(ts, processed), ts.X)
+        for m in list(scores):
+            scores[m] = _window_z(val_scores[m], key_val, scores[m], key_test, "tail")
+            val_scores[m] = _window_z(val_scores[m], key_val, val_scores[m], key_val, "tail")
     if models:
-        t, v = model_scores(models, ts, processed, fuse_with_kalman, kalman_val=val_scores["kalman"],
-                            X_val_raw=X_val_raw)
+        t, v = model_scores(models, ts, processed, fuse_with_kalman, kalman_val=raw_kalman_val,
+                            X_val_raw=X_val_raw, calibration=calibration)
         scores.update(t)
         val_scores.update(v)
     thresholds = alert_thresholds(val_scores, alert_fpr)
     results = cell_metrics(ts.cells, scores, thresholds)
     results.to_csv(out / "results.csv", index=False)
-    by_stratum = alerts_by_stratum(val_scores, thresholds, strata(meta_val.vessel_class.to_numpy(), X_val_raw))
+    by_stratum = alerts_by_stratum(val_scores, thresholds, key_val)
     by_stratum.to_csv(out / "val_alerts_by_stratum.csv", index=False)
     (out / "summary.md").write_text(summarize(results) + summarize_strata(by_stratum))
     np.savez_compressed(out / "scores.npz", **scores)
@@ -299,9 +330,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--fuse-with-kalman", default=None, metavar="PREFIX",
                    help="also score max(model z, Kalman z) for models named PREFIX or PREFIX-sN")
     p.add_argument("--alert-fpr", type=float, default=0.01, help="validation false-alarm budget for thresholds")
+    p.add_argument("--calibration", choices=CALIBRATIONS, default="mad",
+                   help="window-score calibration: mad (contract v2) or tail (validation tail probability)")
     a = p.parse_args(argv)
     models = dict(m.split("=", 1) for m in a.model)
-    run(a.testset, a.processed, {k: Path(v) for k, v in models.items()}, a.out, a.fuse_with_kalman, a.alert_fpr)
+    run(a.testset, a.processed, {k: Path(v) for k, v in models.items()}, a.out, a.fuse_with_kalman, a.alert_fpr,
+        a.calibration)
     print((a.out / "summary.md").read_text())
 
 

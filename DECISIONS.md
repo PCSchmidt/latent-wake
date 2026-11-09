@@ -37,5 +37,13 @@ to review at the `data_contract` gate.
 
 ## Open questions for the owner
 
+- **Window calibration for fusion (proposed amendment v2.1).** On validation
+  the fused detector, with per-stratum median/MAD, put 99% of its alerts on
+  stopped windows (reports/validation-v2.md). Proposed: calibrate every
+  detector's window score as a per-stratum validation tail probability
+  (`--calibration tail`). The fusion rule's form (max of calibrated window
+  scores, 1% validation budget) and every margin stay the same. Decide after
+  comparing both on the validation anomaly set; the test set stays unscored.
+
 See every `[DECIDE ...]` marker in DATA_CONTRACT.md. The main one is the
 headline claim, which sets the success thresholds.
