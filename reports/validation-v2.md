@@ -77,3 +77,41 @@ anyway, because AUROC is computed within each kind against its own normals.
   alone half the time.
 - **Raw target** stays strongest on kinematic kinds and is second on
   loitering. The latent model's case rests on behavioral kinds.
+
+## Follow-up: contract check, stratum diagnostic, location dropout
+
+**Contract check on validation** (`latentwake.checks metrics`, not the gate):
+all eight criteria pass. Behavioral gain over Kalman: AUROC 0.704 vs 0.568,
+AUPRC 0.477 vs 0.302. Fused over Kalman: AUROC 0.819 vs 0.780, AUPRC 0.579 vs
+0.474. Fused over JEPA: AUROC 0.819 vs 0.786 (margin 0.03, so 0.003 to spare),
+AUPRC 0.579 vs 0.515. Fused false alarms 0.0107 (limit 0.02); fused detection
+at budget 0.396 vs Kalman 0.303.
+
+**The fused detector's alerts all go to stopped windows** (confirmed). Under
+way windows are 31% of validation but get 0.7% of the fused detector's
+alerts; the JEPA alone puts 45% there. Its alerts sit in stopped strata:
+unknown 4.5%, passenger 3.9%, high-speed 2.6%, tug 1.8%, pleasure 1.3%.
+Re-standardizing window scores by median and MAD per stratum blows up the
+z-scores of strata whose normal scores barely vary. The contract passes
+anyway, because AUROC is computed within each kind and the detection
+criterion is carried by spoofs and teleports, so the criteria as written do
+not catch a fused detector that never alerts on a moving ship.
+
+The uncalibrated baselines show the opposite skew: Kalman puts 98% of its
+alerts on under-way windows, at rates of 15% on under-way military and law
+enforcement windows and 30% on under-way "other".
+
+**Location dropout did not help.** `posd` (dropout 0.5) is within 0.02 of
+`pos` on behavioral kinds and worse on kinematic ones (teleport 0.699 vs
+0.757); its validation loss stays about 8x the plain JEPA's. A learned
+embedding per grid cell appears to memorize, not generalize. Position context
+stays an ablation result: +0.10 AUROC on route deviation at a large cost
+elsewhere. A non-learned lane prior (traffic density from the training split)
+would be the next thing to try, not a variant of this one.
+
+**Proposed fix (not adopted; owner decision):** `--calibration tail` replaces
+each detector's per-stratum median/MAD window z with -log10 of its
+validation tail probability in that stratum, for every detector including
+the baselines. A stratum of nearly constant scores cannot inflate tail
+probabilities, so a shared threshold spreads alerts across strata in
+proportion to their size.

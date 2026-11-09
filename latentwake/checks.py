@@ -241,7 +241,7 @@ def run_benchmark(cfg_path: Path) -> None:
     check_freeze_order(cfg)
     out = Path(cfg["out"])
     evaluate(Path(cfg["testset"]), Path(cfg["processed"]), {k: Path(v) for k, v in cfg["models"].items()}, out,
-             cfg.get("fuse_with_kalman"), float(cfg.get("alert_fpr", 0.01)))
+             cfg.get("fuse_with_kalman"), float(cfg.get("alert_fpr", 0.01)), cfg.get("calibration", "mad"))
     _ok(f"results written to {out}")
 
 

@@ -171,6 +171,10 @@ def test_train_and_evaluate_end_to_end(tmp_path):
         evaluate(tmp_path / "ts", tmp_path / "processed", models, tmp_path / "eval2", fuse_with_kalman="nope")
     assert res[res.kind != "normal"].auroc.between(0, 1).all()
     assert (tmp_path / "eval" / "summary.md").read_text().startswith("## AUROC")
+    tail = evaluate(tmp_path / "ts", tmp_path / "processed", models, tmp_path / "eval-tail",
+                    fuse_with_kalman="jepa", calibration="tail")
+    assert set(tail.method) == set(res.method)
+    assert tail[tail.kind != "normal"].auroc.between(0, 1).all()
 
 
 def test_window_z_and_fusion_are_scale_free():
@@ -305,3 +309,31 @@ def test_alerts_by_stratum():
     t = alerts_by_stratum({"m": np.array([0.0, 5.0, 0.0, 0.0])}, {"m": 1.0}, key)
     assert list(t.m) == [0.5, 0.0] and list(t.under_way) == [False, True]
     assert "under-way" in summarize_strata(t)
+
+
+def test_tail_calibration_spreads_alerts_across_strata():
+    from latentwake.score import Calibrator, TailCalibrator
+
+    rng = np.random.default_rng(0)
+    # Stratum 2 (stopped): nearly constant scores. Stratum 3 (under way): wide spread.
+    val = np.concatenate([1.0 + 1e-6 * rng.standard_normal(5000), rng.gamma(2.0, 1.0, 5000)])
+    key = np.repeat([2, 3], 5000)
+    for cal, expect_even in ((Calibrator, False), (TailCalibrator, True)):
+        c = cal.fit(val[:, None] if cal is Calibrator else val, key)
+        z = c.transform(val[:, None], key)[:, 0] if cal is Calibrator else c.transform(val, key)
+        alerts = z >= np.quantile(z, 0.99)
+        share_stopped = alerts[key == 2].mean() / alerts.mean() / 2
+        assert (0.3 < share_stopped < 0.7) == expect_even
+
+
+def test_tail_calibration_ranks_beyond_validation_and_falls_back():
+    from latentwake.score import TailCalibrator
+
+    rng = np.random.default_rng(1)
+    val = rng.normal(size=1000)
+    key = np.full(1000, 4)
+    c = TailCalibrator.fit(val, key)
+    t = c.transform(np.array([0.0, val.max(), val.max() + 1, val.max() + 2]), np.full(4, 4))
+    assert np.all(np.diff(t) > 0)
+    # Unknown or small stratum 9 (under way) falls back to the under-way group, then to all.
+    np.testing.assert_allclose(c.transform(np.array([0.5]), np.array([9])), c.transform(np.array([0.5]), np.array([4])))
