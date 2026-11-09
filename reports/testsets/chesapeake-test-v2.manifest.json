@@ -1,0 +1,25 @@
+{
+  "sha256": "826137bdb5260a1d049ac1b8859b36d16043c3ac5b132570a7f4ff39dede8aa7",
+  "frozen_at": "2026-11-09T14:16:18+00:00",
+  "features": [
+    "dx_m",
+    "dy_m",
+    "sog_kn",
+    "sin_cog",
+    "cos_cog",
+    "dheading_deg",
+    "heading_valid"
+  ],
+  "n": 11600,
+  "counts": {
+    "ais_gap": 1800,
+    "loitering": 600,
+    "normal": 5800,
+    "position_spoof": 1200,
+    "route_deviation": 1000,
+    "teleport": 1200
+  },
+  "split": "test",
+  "seed": 0,
+  "processed": "data\\processed\\chesapeake"
+}

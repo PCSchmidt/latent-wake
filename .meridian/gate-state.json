@@ -1,6 +1,14 @@
 {
-  "passed_gates": [],
-  "approvals": {},
+  "passed_gates": [
+    "data_contract",
+    "pipeline_validated"
+  ],
+  "approvals": {
+    "data_contract": {
+      "by": "Chris Schmidt",
+      "at": "2026-11-09T14:15:22Z"
+    }
+  },
   "approval_history": [
     {
       "gate": "data_contract",
