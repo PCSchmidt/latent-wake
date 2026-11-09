@@ -205,6 +205,39 @@ def alert_thresholds(val_scores: dict[str, np.ndarray], alert_fpr: float) -> dic
     return {m: float(np.quantile(v, 1.0 - alert_fpr)) for m, v in val_scores.items()}
 
 
+def alerts_by_stratum(val_scores: dict[str, np.ndarray], thresholds: dict[str, float],
+                      key: np.ndarray) -> pd.DataFrame:
+    """Validation alert rate per calibration stratum and method, at each method's threshold.
+
+    A detector held to a 1% budget should spread its alerts roughly in
+    proportion to where anomalies can happen. If one stratum takes nearly all
+    of them (say, anchored tugs), its calibration scale is off.
+    """
+    from latentwake.data.features import VESSEL_CLASSES
+
+    rows = []
+    for k in np.unique(key):
+        sel = key == k
+        row = {"vessel_class": VESSEL_CLASSES[int(k) // 2], "under_way": bool(k % 2), "n": int(sel.sum())}
+        for m, v in val_scores.items():
+            row[m] = float((np.asarray(v)[sel] >= thresholds[m]).mean())
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def summarize_strata(by_stratum: pd.DataFrame) -> str:
+    methods = [c for c in by_stratum.columns if c not in ("vessel_class", "under_way", "n")]
+    w = by_stratum.n.to_numpy()
+    uw = by_stratum.under_way.to_numpy()
+    share = {m: float((by_stratum[m] * w)[uw].sum() / max((by_stratum[m] * w).sum(), 1e-12)) for m in methods}
+    return (
+        "\n## Validation alerts by stratum (alert rate at the 1% budget threshold)\n\n"
+        + by_stratum.round(4).to_markdown(index=False)
+        + f"\n\nShare of validation alerts on under-way windows ({uw @ w / w.sum():.0%} of windows are under way):\n\n"
+        + pd.Series(share).round(3).to_frame("share").T.to_markdown() + "\n"
+    )
+
+
 def summarize(results: pd.DataFrame) -> str:
     """Markdown: AUROC per cell (rows) by method (columns), then a per-kind mean."""
     anom = results[results.kind != "normal"]
@@ -240,16 +273,19 @@ def run(
     out.mkdir(parents=True, exist_ok=True)
     ts = load_test_set(testset)
     scores = baseline_scores(ts.X)
-    X_val_raw = load_split(processed, "val", normalized=False)[0]
+    X_val_raw, meta_val = load_split(processed, "val", normalized=False)
     val_scores = baseline_scores(X_val_raw)
     if models:
         t, v = model_scores(models, ts, processed, fuse_with_kalman, kalman_val=val_scores["kalman"],
                             X_val_raw=X_val_raw)
         scores.update(t)
         val_scores.update(v)
-    results = cell_metrics(ts.cells, scores, alert_thresholds(val_scores, alert_fpr))
+    thresholds = alert_thresholds(val_scores, alert_fpr)
+    results = cell_metrics(ts.cells, scores, thresholds)
     results.to_csv(out / "results.csv", index=False)
-    (out / "summary.md").write_text(summarize(results))
+    by_stratum = alerts_by_stratum(val_scores, thresholds, strata(meta_val.vessel_class.to_numpy(), X_val_raw))
+    by_stratum.to_csv(out / "val_alerts_by_stratum.csv", index=False)
+    (out / "summary.md").write_text(summarize(results) + summarize_strata(by_stratum))
     np.savez_compressed(out / "scores.npz", **scores)
     return results
 
