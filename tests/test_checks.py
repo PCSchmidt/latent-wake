@@ -229,3 +229,55 @@ def test_contract_rejects_bad_metric_and_op(tmp_path):
     bad_op = FILLED.replace("    vs_method: kalman\n    margin: 0.10", "    vs_method: kalman\n    margin: 0.10\n    op: \"<=\"")
     with pytest.raises(checks.Blocked, match="op <= needs an absolute value"):
         checks.check_contract(_write(tmp_path, bad_op))
+
+
+def test_benchmark_scores_once_and_records_a_miss(processed, tmp_path, monkeypatch):
+    import yaml
+
+    import latentwake.evaluate as ev
+
+    p = processed / "processed"
+    ts = tmp_path / "ts"
+    save_test_set(build_from_processed(p, "test", seed=0, per_cell=3), ts)
+    later = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1)).isoformat(timespec="seconds")
+    models = {"jepa-s0": str(_fake_run(tmp_path, "jepa-s0", later, 20.0))}
+    out = tmp_path / "eval"
+    cfg_path = tmp_path / "eval.yaml"
+    cfg = {"testset": str(ts), "processed": str(p), "out": str(out), "models": models,
+           "fuse_with_kalman": "jepa", "alert_fpr": 0.01, "calibration": "tail"}
+    cfg_path.write_text(yaml.safe_dump(cfg))
+
+    calls = []
+
+    def fake_run(testset, processed_dir, models_, out_dir, *args):
+        calls.append(args)
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        rows = [{"method": m, "kind": k, "level": 0, "auroc": a}
+                for m, a in (("jepa-s0", 0.70), ("kalman", 0.65)) for k in ("loitering", "route_deviation")]
+        rows += [{"method": "jepa-s0", "kind": "position_spoof", "level": 0, "auroc": 0.9}]
+        pd.DataFrame(rows).to_csv(Path(out_dir) / "results.csv", index=False)
+        (Path(out_dir) / "summary.md").write_text("## AUROC by kind\n\n(table)\n")
+
+    monkeypatch.setattr(ev, "run", fake_run)
+    checks.run_benchmark(cfg_path)
+    checks.run_benchmark(cfg_path)            # identical inputs: no second scoring
+    assert len(calls) == 1
+    cfg_path.write_text(yaml.safe_dump(dict(cfg, alert_fpr=0.02)))
+    with pytest.raises(checks.Blocked, match="second look"):
+        checks.run_benchmark(cfg_path)
+    assert len(calls) == 1
+    cfg_path.write_text(yaml.safe_dump(cfg))
+
+    contract = _write(tmp_path, FILLED)      # behavioral margin 0.10: 0.70 vs 0.65 misses
+    with pytest.raises(checks.Blocked, match="not met"):
+        checks.check_metrics(out / "results.csv", contract)
+    checks.check_metrics(out / "results.csv", contract, record=True)
+    verdict = json.loads((out / "criteria.json").read_text())
+    assert verdict["failed"] == ["behavioral"] and not verdict["all_passed"]
+
+    dest = tmp_path / "EVAL_RESULTS.md"
+    checks.write_eval_results(cfg_path, dest)
+    text = dest.read_text()
+    assert "1 of 2 criteria met; not met: behavioral" in text and "### AUROC by kind" in text
+    with pytest.raises(checks.Blocked, match="--force"):
+        checks.write_eval_results(cfg_path, dest)

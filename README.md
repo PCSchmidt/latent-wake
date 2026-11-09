@@ -166,7 +166,7 @@ This project runs under [Meridian](https://github.com/PCSchmidt/meridian) (`ml-r
 | `data_contract` (owner approves) | DATA_CONTRACT.md has no open `[DECIDE]` items and complete thresholds | `validate-data-contract.sh` |
 | `pipeline_validated` | Real data cropped with no failed days, splits leak-free, test set frozen | `validate-schema/preprocessing/splits/testset.sh`, unit tests |
 | `training_stable` | Three or more seeds per latent model, none collapsed | `validate-training.sh` |
-| `model_eval` (owner approves) | Every model trained after the test set froze; every contract criterion met | `run-benchmark.sh`, `validate-metrics.sh` |
+| `model_eval` (owner approves) | Every model trained after the test set froze; the test set scored exactly once; the verdict on every contract criterion recorded in EVAL_RESULTS.md, pass or fail | `run-benchmark.sh`, `validate-metrics.sh` |
 | `ablation_study` (owner approves) | ABLATION_RESULTS.md written | — |
 | `demo_shipped` (owner approves) | Write-up, model card, changelog; full test suite green | `run-all-tests.sh` |
 
