@@ -210,3 +210,77 @@ def test_attention_pooling_can_focus_on_one_step():
     mean_model.load_state_dict({k: v for k, v in m.state_dict().items() if "pool_score" not in k})
     x, v = torch.randn(2, 64, len(FEATURES)), torch.randint(0, 10, (2,))
     assert torch.allclose(m.embed(x, v), mean_model.embed(x, v), atol=1e-5)
+
+
+def test_behavioral_kinds_compare_against_moving_transit_normals():
+    import pandas as pd
+
+    from latentwake.evaluate import cell_metrics
+
+    # Normals: moving cargo (score 0), moving tugs (score 10), anchored cargo (score -10).
+    cells = pd.DataFrame({
+        "kind": ["normal"] * 6 + ["loitering"] * 2 + ["teleport"] * 2,
+        "level": [-1] * 6 + [0] * 4,
+        "params": ["{}"] * 10,
+        "source_mean_sog": [8, 8, 8, 8, 0, 0, 8, 8, 8, 8],
+        "source_vessel_class": [1, 1, 5, 5, 1, 1, 1, 1, 5, 5],
+    })
+    scores = {"m": np.array([0, 0, 10, 10, -10, -10, 5, 5, 5, 5], float)}
+    res = cell_metrics(cells, scores).set_index("kind")
+    assert res.loc["loitering", "n_normal"] == 2 and res.loc["loitering", "auroc"] == 1.0
+    assert res.loc["teleport", "n_normal"] == 6
+
+
+def test_calibration_strata_split_underway_from_stopped():
+    from latentwake.evaluate import strata
+
+    X = np.zeros((4, 64, len(FEATURES)), np.float32)
+    X[[1, 3], :, FEATURES.index("sog_kn")] = 9.0
+    key = strata(np.array([2, 2, 5, 5]), X)
+    assert list(key) == [4, 5, 10, 11]
+
+
+def test_position_context_model():
+    m = LatentWake(tiny(use_position=True, n_cells=50))
+    x, v = torch.randn(3, 64, len(FEATURES)), torch.randint(0, 10, (3,))
+    cells = torch.randint(0, 50, (3, 64))
+    out = m(x, v, cells)
+    out["loss"].backward()
+    assert m.encoder.place.weight.grad is not None
+    with pytest.raises(ValueError, match="cells"):
+        m(x, v)
+    with torch.no_grad():
+        a = m.surprise(x, v, cells)
+        b = m.surprise(x, v, (cells + 1) % 50)
+    assert not torch.allclose(a, b)
+    with pytest.raises(ValueError, match="n_cells"):
+        LatentWake(tiny(use_position=True))
+
+
+def test_train_with_position_end_to_end(tmp_path):
+    from latentwake.data import preprocess as pp
+    from latentwake.data.regions import get_region
+    from latentwake.data.synthetic import simulate_days, write_interim
+    from latentwake.evaluate import run as evaluate
+    from latentwake.inject.build import build_test_set, save_test_set
+    from latentwake.train import TrainConfig, load_model, train
+
+    write_interim(simulate_days(dt.date(2025, 4, 1), n_days=6, n_vessels=40, seed=5), tmp_path / "interim")
+    pp.run(tmp_path / "interim", tmp_path / "processed")
+    cfg = TrainConfig(processed=str(tmp_path / "processed"), out=str(tmp_path / "run"),
+                      model=tiny(use_position=True), epochs=1, batch_size=32, stationary_keep=1.0)
+    train(cfg, log=lambda *_: None)
+    model = load_model(tmp_path / "run" / "best.pt")
+    assert model.cfg.n_cells == pp.grid_size(tmp_path / "processed")
+
+    region = get_region("chesapeake")
+    X, meta, raw = pp.load_split(tmp_path / "processed", "test", normalized=False, raw=True)
+    no_loc = build_test_set(X, raw, meta, seed=0, per_cell=3)
+    save_test_set(no_loc, tmp_path / "ts-noloc")
+    with pytest.raises(ValueError, match="location cells"):
+        evaluate(tmp_path / "ts-noloc", tmp_path / "processed", {"pos": tmp_path / "run" / "best.pt"}, tmp_path / "e0")
+    ts = build_test_set(X, raw, meta, seed=0, per_cell=3, loc=pp.load_cells(tmp_path / "processed", meta),
+                        cell_fn=lambda la, lo: region.cell_index(la, lo))
+    save_test_set(ts, tmp_path / "ts")
+    res = evaluate(tmp_path / "ts", tmp_path / "processed", {"pos": tmp_path / "run" / "best.pt"}, tmp_path / "e1")
+    assert res[res.kind != "normal"].auroc.between(0, 1).all()

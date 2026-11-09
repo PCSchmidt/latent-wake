@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass(frozen=True)
 class BBox:
@@ -27,6 +29,23 @@ class BBox:
 
     def contains(self, lat: float, lon: float) -> bool:
         return self.lat_min <= lat <= self.lat_max and self.lon_min <= lon <= self.lon_max
+
+    def grid_shape(self, cell_deg: float = 0.05) -> tuple[int, int]:
+        """Rows and columns of a regular grid over the box (0.05 deg is about 5 km)."""
+        rows = int(np.ceil((self.lat_max - self.lat_min) / cell_deg))
+        cols = int(np.ceil((self.lon_max - self.lon_min) / cell_deg))
+        return rows, cols
+
+    def n_cells(self, cell_deg: float = 0.05) -> int:
+        rows, cols = self.grid_shape(cell_deg)
+        return rows * cols
+
+    def cell_index(self, lat, lon, cell_deg: float = 0.05) -> np.ndarray:
+        """Grid cell id for each position; positions outside the box clip to the edge cells."""
+        rows, cols = self.grid_shape(cell_deg)
+        r = np.clip(((np.asarray(lat) - self.lat_min) / cell_deg).astype(np.int64), 0, rows - 1)
+        c = np.clip(((np.asarray(lon) - self.lon_min) / cell_deg).astype(np.int64), 0, cols - 1)
+        return (r * cols + c).astype(np.int32)
 
 
 REGIONS: dict[str, BBox] = {

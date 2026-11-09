@@ -2,8 +2,8 @@
 # One place to change them; the checks read nothing else.
 interim: data/interim/chesapeake
 processed: data/processed/chesapeake
-testset: data/testsets/chesapeake-test-v1
-out: reports/eval-v1
+testset: data/testsets/chesapeake-test-v2
+out: reports/eval-v2
 contract: DATA_CONTRACT.md
 
 # The combined detector: max of the JEPA's and Kalman's window z-scores, both

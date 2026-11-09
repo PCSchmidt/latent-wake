@@ -4,8 +4,8 @@
     "name": "Data Pipeline",
     "source_section": "Data Pipeline",
     "lifecycle": {
-      "happy_path": false,
-      "integration": false,
+      "happy_path": true,
+      "integration": true,
       "edge_cases": false,
       "error_handling": false,
       "hardening": false
@@ -16,7 +16,7 @@
     "name": "Anomaly Test Sets",
     "source_section": "Anomaly Test Sets",
     "lifecycle": {
-      "happy_path": false,
+      "happy_path": true,
       "integration": false,
       "edge_cases": false,
       "error_handling": false,
@@ -28,7 +28,7 @@
     "name": "Model Training",
     "source_section": "Model Training",
     "lifecycle": {
-      "happy_path": false,
+      "happy_path": true,
       "integration": false,
       "edge_cases": false,
       "error_handling": false,
@@ -40,7 +40,7 @@
     "name": "Baselines",
     "source_section": "Baselines",
     "lifecycle": {
-      "happy_path": false,
+      "happy_path": true,
       "integration": false,
       "edge_cases": false,
       "error_handling": false,
@@ -52,7 +52,7 @@
     "name": "Model Evaluation",
     "source_section": "Model Evaluation",
     "lifecycle": {
-      "happy_path": false,
+      "happy_path": true,
       "integration": false,
       "edge_cases": false,
       "error_handling": false,

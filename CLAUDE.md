@@ -9,8 +9,8 @@ Latent Wake: a trajectory JEPA that flags anomalous AIS vessel tracks. Plan in
 `DECISIONS.md`; gate check paths in `configs/eval.yaml`. Rules that matter:
 - Never train on real data before `data_contract` passes, and never before the
   test set is frozen (`validate-testset.sh`, `run-benchmark.sh` enforce this).
-- Never tune against a test set; calibrate on validation only. Score route
-  deviation and loitering against moving normals only.
+- Never tune against a test set; calibrate on validation only. Contract v2: Class A
+  only; behavioral kinds only in moving transit vessels, scored against those.
 - Owner-approval gates are approved by Chris in his own terminal, not by an agent.
 
 ## What Meridian is

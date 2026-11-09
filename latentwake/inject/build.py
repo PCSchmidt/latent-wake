@@ -8,7 +8,7 @@ which is how "test sets frozen before any model run" is enforced in code.
 
 Usage:
     python -m latentwake.inject.build --processed data/processed/chesapeake \\
-        --split test --out data/testsets/chesapeake-test-v1 --per-cell 200
+        --split test --out data/testsets/chesapeake-test-v2 --per-cell 200
 """
 
 from __future__ import annotations
@@ -24,21 +24,27 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from latentwake.data.features import FEATURES, Normalizer, step_features
+from latentwake.data.features import FEATURES, VESSEL_CLASSES, Normalizer, step_features
 from latentwake.inject.anomalies import DEFAULT_GRID, INJECTORS, NEEDS_MOTION, Injection
 
 MOVING_SOG_KN = 3.0
+# Contract v2: behavioral anomalies go only into vessels that normally transit.
+# Loitering or turning off a line is ordinary work for a tug, fishing boat, or
+# pleasure craft, so injecting it there tests nothing.
+TRANSIT_CLASSES = tuple(VESSEL_CLASSES.index(c) for c in ("cargo", "tanker", "passenger"))
 
 
 @dataclass
 class TestSet:
     X: np.ndarray            # (N, L, F) features, unnormalized
     step_label: np.ndarray   # (N, L) bool
-    cells: pd.DataFrame      # one row per window: kind, level, params, source window, source speed
+    cells: pd.DataFrame      # one row per window: kind, level, params, source window, speed, vessel class
+    loc: np.ndarray | None = None  # (N, L) location grid cell per step, from the (injected) positions
 
-    # Evaluate kinds in NEEDS_MOTION only against normals with
-    # source_mean_sog >= MOVING_SOG_KN. Otherwise "moving vs anchored" leaks in
-    # as a fake detection signal: anchored ships are easy to call normal.
+    # Evaluate kinds in NEEDS_MOTION only against normals that are moving and
+    # in TRANSIT_CLASSES, the same population they are injected into.
+    # Otherwise "moving vs anchored" or "tanker vs tug" leaks in as a fake
+    # detection signal.
 
     @property
     def label(self) -> np.ndarray:
@@ -60,8 +66,15 @@ def build_test_set(
     per_cell: int = 200,
     n_normal: int | None = None,
     grid: dict[str, list[dict]] | None = None,
+    loc: np.ndarray | None = None,
+    cell_fn=None,
 ) -> TestSet:
-    """X is unnormalized (N, L, F); raw holds (N, L) lat/lon/sog/cog/heading for the same windows."""
+    """X is unnormalized (N, L, F); raw holds (N, L) lat/lon/sog/cog/heading for the same windows.
+
+    With loc (the source windows' location cells) and cell_fn (lat, lon -> cell
+    ids), the test set also carries location cells, recomputed from injected
+    positions so a teleport lands in the cell it jumped to.
+    """
     grid = grid or DEFAULT_GRID
     N, L, _ = X.shape
     rng = np.random.default_rng(seed)
@@ -74,8 +87,12 @@ def build_test_set(
     normal_idx = order[:n_normal]
     pool = order[n_normal:] if N > n_normal else order
     moving = meta.mean_sog.to_numpy() >= MOVING_SOG_KN
+    vclass = meta.vessel_class.to_numpy() if "vessel_class" in meta else np.full(N, -1)
+    transit = np.isin(vclass, TRANSIT_CLASSES)
+    track_loc = loc is not None and cell_fn is not None
 
     xs, ys, rows = [X[normal_idx]], [np.zeros((len(normal_idx), L), dtype=bool)], []
+    locs = [loc[normal_idx]] if track_loc else []
     for i in normal_idx:
         rows.append(
             {
@@ -84,11 +101,12 @@ def build_test_set(
                 "params": "{}",
                 "source_window": int(meta.window_id.iat[i]),
                 "source_mean_sog": float(meta.mean_sog.iat[i]),
+                "source_vessel_class": int(vclass[i]),
             }
         )
 
     for k_i, (kind, levels) in enumerate(sorted(grid.items())):
-        candidates = pool[moving[pool]] if kind in NEEDS_MOTION else pool
+        candidates = pool[moving[pool] & transit[pool]] if kind in NEEDS_MOTION else pool
         if candidates.size == 0:
             continue
         for lvl_i, level in enumerate(levels):
@@ -100,6 +118,8 @@ def build_test_set(
                 inj = INJECTORS[kind](r, win_rng, **level)
                 xs.append(features_after_injection(X[w], inj)[None])
                 ys.append(inj.label[None])
+                if track_loc:
+                    locs.append(np.asarray(cell_fn(inj.lat, inj.lon), dtype=np.int32)[None])
                 rows.append(
                     {
                         "kind": kind,
@@ -107,22 +127,27 @@ def build_test_set(
                         "params": json.dumps(inj.params, sort_keys=True),
                         "source_window": int(meta.window_id.iat[w]),
                         "source_mean_sog": float(meta.mean_sog.iat[w]),
+                        "source_vessel_class": int(vclass[w]),
                     }
                 )
     return TestSet(
         X=np.concatenate(xs).astype(np.float32),
         step_label=np.concatenate(ys),
         cells=pd.DataFrame(rows),
+        loc=np.concatenate(locs).astype(np.int32) if track_loc else None,
     )
 
 
-def _digest(X: np.ndarray, step_label: np.ndarray, cells_csv: str) -> str:
+def _digest(X: np.ndarray, step_label: np.ndarray, cells_csv: str, loc: np.ndarray | None = None) -> str:
     # Hash the CSV text exactly as stored; re-serializing a parsed frame is not
-    # byte-stable (float formatting can change).
+    # byte-stable (float formatting can change). Location cells are hashed only
+    # when present, so test sets saved before they existed still verify.
     h = hashlib.sha256()
     h.update(np.ascontiguousarray(X).tobytes())
     h.update(np.ascontiguousarray(step_label).tobytes())
     h.update(cells_csv.encode())
+    if loc is not None:
+        h.update(np.ascontiguousarray(loc).tobytes())
     return h.hexdigest()
 
 
@@ -131,10 +156,13 @@ def save_test_set(ts: TestSet, out_dir: Path, info: dict | None = None) -> str:
     if (out_dir / "manifest.json").exists():
         raise FileExistsError(f"{out_dir} already holds a frozen test set; use a new version name")
     out_dir.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_dir / "arrays.npz", X=ts.X, step_label=ts.step_label)
+    arrays = {"X": ts.X, "step_label": ts.step_label}
+    if ts.loc is not None:
+        arrays["loc"] = ts.loc
+    np.savez_compressed(out_dir / "arrays.npz", **arrays)
     cells_csv = ts.cells.to_csv(index=False, lineterminator="\n")
     (out_dir / "cells.csv").write_bytes(cells_csv.encode())
-    digest = _digest(ts.X, ts.step_label, cells_csv)
+    digest = _digest(ts.X, ts.step_label, cells_csv, ts.loc)
     counts = ts.cells.groupby("kind").size().to_dict()
     frozen_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     manifest = {"sha256": digest, "frozen_at": frozen_at, "features": FEATURES, "n": int(len(ts.cells)),
@@ -148,17 +176,32 @@ def load_test_set(out_dir: Path, normalizer: Normalizer | None = None) -> TestSe
     manifest = json.loads((out_dir / "manifest.json").read_text())
     arrays = np.load(out_dir / "arrays.npz")
     cells_csv = (out_dir / "cells.csv").read_bytes().decode()
-    if _digest(arrays["X"], arrays["step_label"], cells_csv) != manifest["sha256"]:
+    loc = arrays["loc"] if "loc" in arrays.files else None
+    if _digest(arrays["X"], arrays["step_label"], cells_csv, loc) != manifest["sha256"]:
         raise ValueError(f"test set in {out_dir} does not match its checksum; it was modified after freezing")
     cells = pd.read_csv(io.StringIO(cells_csv), dtype={"params": str})
-    ts = TestSet(X=arrays["X"], step_label=arrays["step_label"], cells=cells)
+    ts = TestSet(X=arrays["X"], step_label=arrays["step_label"], cells=cells, loc=loc)
     if normalizer is not None:
         ts.X = normalizer.transform(ts.X)
     return ts
 
 
+def build_from_processed(processed: Path, split: str, seed: int, per_cell: int = 200) -> TestSet:
+    """Build a test set from a processed split, with location cells (contract v2)."""
+    from latentwake.data.preprocess import PreprocessConfig, load_cells, load_split
+    from latentwake.data.regions import get_region
+
+    processed = Path(processed)
+    X, meta, raw = load_split(processed, split, normalized=False, raw=True)
+    pcfg = PreprocessConfig(**json.loads((processed / "stats.json").read_text())["config"])
+    region = get_region(pcfg.region)
+    return build_test_set(
+        X, raw, meta, seed=seed, per_cell=per_cell,
+        loc=load_cells(processed, meta), cell_fn=lambda lat, lon: region.cell_index(lat, lon, pcfg.cell_deg),
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
-    from latentwake.data.preprocess import load_split
 
     p = argparse.ArgumentParser(description="Build and freeze a labeled anomaly test set.")
     p.add_argument("--processed", type=Path, default=Path("data/processed/chesapeake"))
@@ -167,8 +210,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--per-cell", type=int, default=200)
     a = p.parse_args(argv)
-    X, meta, raw = load_split(a.processed, a.split, normalized=False, raw=True)
-    ts = build_test_set(X, raw, meta, seed=a.seed, per_cell=a.per_cell)
+    ts = build_from_processed(a.processed, a.split, a.seed, a.per_cell)
     digest = save_test_set(ts, a.out, info={"split": a.split, "seed": a.seed, "processed": str(a.processed)})
     print(f"froze {len(ts.cells)} windows to {a.out} (sha256 {digest[:12]})")
 

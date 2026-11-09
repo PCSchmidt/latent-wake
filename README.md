@@ -103,7 +103,7 @@ The box in `latentwake/data/regions.py` is a loose first pass. Plot the first da
 python -m latentwake.data.preprocess --interim data/interim/chesapeake --out data/processed/chesapeake
 ```
 
-Drops bad identities, NOAA "not available" sentinels, duplicates, and single-report position glitches; splits each vessel into tracks at silences over 30 minutes (logged to `gaps.parquet`); resamples to a shared 2-minute grid, marking any step that would need more than 3 missing steps of interpolation as invalid; computes per-step relative-motion features; and cuts 64-step windows (about 2 hours) with stride 16 over fully valid stretches only.
+Keeps Class A transceivers only (contract v2; `--transceivers all` for the Class B secondary analysis, written to another `--out`), drops bad identities, NOAA "not available" sentinels, duplicates, and single-report position glitches; splits each vessel into tracks at silences over 30 minutes (logged to `gaps.parquet`); resamples to a shared 2-minute grid, marking any step that would need more than 3 missing steps of interpolation as invalid; computes per-step relative-motion features and a 0.05° location grid cell (used only by the position-context option); and cuts 64-step windows (about 2 hours) with stride 16 over fully valid stretches only.
 
 Splits are by time *and* vessel: training uses 70% of vessels before the cutoff (two-thirds through the data by default); validation and test use the other 30% after it. No vessel or time period appears on both sides. Feature statistics come from the training split only. `stats.json` records row counts at every stage.
 
@@ -111,7 +111,7 @@ Splits are by time *and* vessel: training uses 70% of vessels before the cutoff 
 
 ```bash
 python -m latentwake.inject.build --processed data/processed/chesapeake --split test \
-    --out data/testsets/chesapeake-test-v1
+    --out data/testsets/chesapeake-test-v2
 ```
 
 Injects seeded anomalies into copies of held-out windows, one cell per kind and severity level, alongside untouched normal windows. The output carries a SHA-256 checksum: loading verifies it, and saving refuses to overwrite, so the test set is fixed before any model sees it.
@@ -126,7 +126,7 @@ Injects seeded anomalies into copies of held-out windows, one cell per kind and 
 
 The first three are kinematically *inconsistent* (positions contradict reported motion). The last two are *consistent* (only the behavior is unusual), which tests whether a model learned normal behavior rather than just physics.
 
-**Evaluation rule:** score `route_deviation` and `loitering` only against normal windows from moving vessels (`source_mean_sog >= 3`). Those anomalies are injected only into moving ships, and anchored ships are trivially "normal," so comparing against all normals rewards detecting motion, not anomalies. On synthetic data, a plain physics-consistency check scores about 0.73 AUROC on them unmatched and 0.48 matched.
+**Evaluation rule (contract v2):** `route_deviation` and `loitering` are injected only into moving cargo, tanker, and passenger windows, and scored only against normal windows from that same population (moving, `source_mean_sog >= 3`, transit class). Loitering is ordinary work for a tug or fishing boat, and anchored ships are trivially "normal," so any other comparison rewards telling vessel types or motion apart, not finding anomalies. On synthetic data, a plain physics-consistency check scores about 0.73 AUROC on them unmatched and 0.48 matched. The kinematic kinds go into every Class A vessel.
 
 ### Step 4: train
 
@@ -136,17 +136,17 @@ python -m latentwake.train --processed data/processed/chesapeake --out runs/jepa
 
 Defaults follow LeWorldModel: SIGReg weight 0.09 with 17 knots and 1,024 projections, AdamW, gradient clip 1.0, no EMA or stop-gradient. Learning rate 3e-4 with warmup and cosine decay, batch 256, 30 epochs, bf16 on CUDA. Anchored and moored windows are kept at 25% (`--stationary-keep`) so they don't dominate training.
 
-Each epoch logs training and validation prediction loss, SIGReg, and `val_erank`, the effective rank of validation latents. A healthy run stays well above 1. A slide toward 1 means collapse, and the log flags it. Ablations are flags: `--target raw` (no encoder, no SIGReg), `--no-action`, `--sigreg-weight 0`. `--size small` is a 0.8M-parameter version for CPU debugging; the full model is 10.1M.
+Each epoch logs training and validation prediction loss, SIGReg, and `val_erank`, the effective rank of validation latents. A healthy run stays well above 1. A slide toward 1 means collapse, and the log flags it. Ablations are flags: `--target raw` (no encoder, no SIGReg), `--no-action`, `--sigreg-weight 0`. Architecture options, chosen on validation data only: `--pooling attention`, `--chunk-len 4`, `--use-position` (adds a location-cell embedding per chunk). `--size small` is a 0.8M-parameter version for CPU debugging; the full model is 10.1M.
 
 ### Step 5: evaluate
 
 ```bash
-python -m latentwake.evaluate --testset data/testsets/chesapeake-test-v1 \
-    --processed data/processed/chesapeake --out reports/eval-v1 \
+python -m latentwake.evaluate --testset data/testsets/chesapeake-test-v2 \
+    --processed data/processed/chesapeake --out reports/eval-v2 \
     --model jepa=runs/jepa-s0/best.pt --model raw=runs/raw-s0/best.pt
 ```
 
-Always includes two non-learned baselines: a physics residual (observed motion versus reported speed and course) and a constant-velocity Kalman filter that observes position and reported velocity and scores each step by normalized innovation squared. Learned models are calibrated per vessel class on the validation split (median and MAD), so a fishing boat's normal jitter isn't scored like a tanker's. Writes AUROC and AUPRC per anomaly cell to `results.csv` and `summary.md`.
+Always includes two non-learned baselines: a physics residual (observed motion versus reported speed and course) and a constant-velocity Kalman filter that observes position and reported velocity and scores each step by normalized innovation squared. Every detector is calibrated per stratum, vessel class × under way (mean reported speed ≥ 1 kn), on the validation split (median and MAD), so a fishing boat's jitter isn't scored like a tanker's and an anchored tanker isn't scored like one in the channel. Writes AUROC and AUPRC per anomaly cell to `results.csv` and `summary.md`.
 
 ### Working offline with synthetic traffic
 

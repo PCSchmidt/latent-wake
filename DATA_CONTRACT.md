@@ -2,7 +2,7 @@
 
 **Project:** Latent Wake: JEPA surprise detection for maritime vessel tracks
 **Owner:** Chris Schmidt
-**Date:** 2026-11-07 (all decisions recorded; owner approval of the `data_contract` gate pending)
+**Date:** 2026-11-07; amended 2026-11-09 (version 2, see the amendment log at the end; owner re-approval of the `data_contract` gate pending)
 **Framework:** Meridian (ml-research recipe)
 
 This document is the single source of truth for what this experiment is trying
@@ -40,7 +40,8 @@ misses, without giving up the anomalies the filter already catches.
 | Source | NOAA MarineCadastre AIS daily files (`ais-YYYY-MM-DD.csv.zst`) |
 | Region | Chesapeake Bay and Hampton Roads, box in `latentwake/data/regions.py` |
 | Period | 2025-04-01 to 2025-06-30 (three months) |
-| Volume | Unknown until the first download; record it here after step 1 |
+| Population | Class A transceivers only (`transceiver == "A"`); Class B is a reported secondary analysis |
+| Volume | 43.9M reports, all transceivers; about 21.9M Class A reports from about 2,400 vessels |
 | Access | Public HTTPS, no key (`latentwake/data/download.py`) |
 | License | Public US government data |
 | Evaluation data | OMTAD (CC BY-NC, evaluation only, not redistributed) and its equation-grounded anomaly labels |
@@ -65,14 +66,17 @@ vessel_type      | int32     | AIS ship-type code
 
 Model input per 2-minute step (`latentwake/data/features.py`): east and north
 displacement (m), reported speed, sine and cosine of reported course, heading
-change, heading-valid flag. Relative motion only; no absolute position.
+change, heading-valid flag. Relative motion only. The position-context option
+(amendment 4) adds one input: the 0.05° grid cell of each chunk's first step.
 
 ### Known Data Quality Issues
 
 - NOAA's 2025 files changed column names and file naming; the download step
   normalizes both schemas. Not yet verified against a real 2025 file.
 - Sentinel values (SOG 102.3, COG 360, heading 511) become missing, not zero.
-- Class B transponders often send no heading.
+- Class B transponders often send no heading. Class B is about half of all
+  reports here (pleasure craft alone are 19.4M), which is why the main study
+  uses Class A only.
 - Course is unreliable below about 1 knot.
 - Single-report position glitches are removed; a lasting position jump is
   kept, since it may be real spoofing.
@@ -113,16 +117,20 @@ anomalies that physics-based detection misses, and adding it to a Kalman
 filter gives a better detector than either one alone.
 
 `model_eval` passes only if **every** criterion in the block below holds,
-computed from `reports/eval-v1/results.csv`. Each method's score is the mean
+computed from `reports/eval-v2/results.csv`. Each method's score is the mean
 over each kind's severity cells, then weighted equally across the listed
 kinds, then averaged across seeds (`jepa-s0`, `jepa-s1`, ...). Kinds are
 `position_spoof`, `teleport`, `ais_gap` (kinematically inconsistent) and
-`loitering`, `route_deviation` (behavioral). Behavioral kinds are always
-scored against moving normal vessels only.
+`loitering`, `route_deviation` (behavioral). Behavioral kinds are injected
+only into moving cargo, tanker, and passenger windows and are always scored
+against moving normal windows of those same classes. Kinematic kinds are
+injected into all Class A vessels and scored against all normal windows.
 
 **The combined detector (`fused`)** is fixed before any real data and fits
 nothing to a test set. Each detector's window score is turned into a robust
-z-score per vessel class using validation windows (median and MAD). The
+z-score per stratum, vessel class × under way (mean reported speed in the
+window at least 1 knot), using validation windows (median and MAD). Version 1
+used vessel class alone. The
 fused score is the larger of the JEPA's z and the Kalman filter's z.
 Implemented in `latentwake/evaluate.py` (`model_scores`); `jepa-sN` yields
 `fused-sN`.
@@ -258,7 +266,7 @@ Human-approved decisions about the approach (not to be overridden by the agent):
 - **Rejected approaches:** Pixel or map rendering of tracks; supervised
   training on injected anomalies (it would learn the injector, not normal traffic).
 - **Model selection and architecture changes** (pooling, chunk length,
-  SIGReg weight) use only validation data: validation loss, plus a separate
+  SIGReg weight, position context) use only validation data: validation loss, plus a separate
   validation anomaly set built from the val split with its own seed. The test
   set is scored once per final configuration. A rerun is allowed only to fix a
   bug, and is logged in DECISIONS.md with the reason.
@@ -276,3 +284,35 @@ Human-approved decisions about the approach (not to be overridden by the agent):
 | Inference mode | Batch, offline |
 | Latency budget | None (offline); live ONNX scoring is a stretch goal |
 | Model format | PyTorch checkpoint; ONNX only if the stretch goal is taken |
+
+---
+
+## Amendment Log
+
+### Version 2, 2026-11-09 (owner decision, on agent recommendation)
+
+**Why.** Validation results on version 1 (`reports/validation-v1.md`) and a
+look at the data's composition showed the test population did not match the
+claim. About half of all reports come from Class B transceivers, mostly
+pleasure craft. Behavioral anomalies were injected into any moving vessel,
+including tugs and fishing boats, for which loitering and turning off a line
+are normal work. Calibration pooled anchored and moving windows of a class.
+No test-set score was used in this decision: the test set was frozen and
+scored by nothing.
+
+| # | Change | Where |
+|---|--------|-------|
+| 1 | Main study population is Class A transceivers only. Class B is a reported secondary analysis, not gated. | `PreprocessConfig.transceivers`; checked by `validate-preprocessing.sh` |
+| 2 | Behavioral anomalies (loitering, route deviation) are injected only into moving cargo, tanker, and passenger windows and scored against moving normals of those classes. Kinematic anomalies go into all Class A vessels. | `inject/build.py` (`TRANSIT_CLASSES`), `evaluate.cell_metrics`; checked by `validate-testset.sh` |
+| 3 | Calibration strata, for every detector and for fusion, are vessel class × under way. | `evaluate.strata` |
+| 4 | Route deviation stays in the criteria. A position-context model option (location-cell embedding) is added as an architecture choice, chosen on validation data like pooling and chunk length. | `ModelConfig.use_position`, `--use-position` |
+
+**Unchanged:** every threshold and margin in the criteria block, the fusion
+rule's form (max of window z-scores), the 1% alert budget, the split, and
+the seeds.
+
+**Consequences.** Test set v1 (sha256 a90bdd531f4b) is retired unscored;
+test set v2 is built from the Class A data and frozen before any version 2
+model trains. The `data_contract` and `pipeline_validated` gates are reopened
+(`scripts/reopen-gate.sh`) and passed again. Every model is retrained on the
+Class A data after test set v2 freezes; `run-benchmark.sh` enforces the order.

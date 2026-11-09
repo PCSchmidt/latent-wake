@@ -2,7 +2,8 @@
 
 Raw prediction error is not comparable across vessel types: fishing boats and
 tugs are naturally less predictable than tankers. The calibrator fits a robust
-z-score (median and MAD) per vessel class on validation windows, which contain
+z-score (median and MAD) per stratum (vessel class, or under contract v2
+vessel class x under way) on validation windows, which contain
 no injected anomalies, and falls back to the pooled statistics for rare classes.
 
 Scores:
@@ -26,14 +27,24 @@ MAD_TO_STD = 1.4826
 
 
 @torch.no_grad()
-def transition_errors(model: LatentWake, X: np.ndarray, vclass: np.ndarray, batch: int = 1024) -> np.ndarray:
-    """Per-transition prediction error for normalized windows X (N, L, F)."""
+def transition_errors(model: LatentWake, X: np.ndarray, vclass: np.ndarray, batch: int = 1024,
+                      cells: np.ndarray | None = None) -> np.ndarray:
+    """Per-transition prediction error for normalized windows X (N, L, F).
+
+    cells (N, L) location grid ids are required by position-context models and
+    ignored by the rest.
+    """
     device = next(model.parameters()).device
+    if model.cfg.use_position and cells is None:
+        raise ValueError("this model uses position context; pass cells")
     out = []
     for a in range(0, len(X), batch):
         x = torch.as_tensor(np.ascontiguousarray(X[a : a + batch], dtype=np.float32), device=device)
         v = torch.as_tensor(np.ascontiguousarray(vclass[a : a + batch], dtype=np.int64), device=device)
-        out.append(model.surprise(x, v).float().cpu().numpy())
+        c = None
+        if model.cfg.use_position:
+            c = torch.as_tensor(np.ascontiguousarray(cells[a : a + batch], dtype=np.int64), device=device)
+        out.append(model.surprise(x, v, c).float().cpu().numpy())
     return np.concatenate(out) if out else np.zeros((0, model.cfg.n_chunks - 1), dtype=np.float32)
 
 
