@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -217,51 +218,90 @@ def resample_track(t_s, lat, lon, sog, cog, heading, cfg: PreprocessConfig) -> d
     return out
 
 
+def _track_vessel_class(points: pd.DataFrame) -> dict[int, int]:
+    """Most frequent reported ship type per track, mapped to a vessel class (vectorized)."""
+    vt = points[["track_id", "vessel_type"]].dropna()
+    if vt.empty:
+        return {}
+    counts = vt.groupby(["track_id", "vessel_type"]).size().reset_index(name="n")
+    top = counts.sort_values(["track_id", "n"], ascending=[True, False]).drop_duplicates("track_id")
+    code_to_class = {c: vessel_class(c) for c in top.vessel_type.unique()}
+    return dict(zip(top.track_id.astype(int), top.vessel_type.map(code_to_class).astype(int)))
+
+
 def resample(points: pd.DataFrame, cfg: PreprocessConfig) -> pd.DataFrame:
-    parts = []
+    """Resample every track. Accumulates plain arrays and builds one frame at the end;
+    building a DataFrame per track was the bottleneck at 100k+ tracks."""
     t_all = _epoch_s(points.t)
     cols = {c: points[c].to_numpy(dtype=np.float64) for c in ("lat", "lon", "sog", "cog", "heading")}
     tid = points.track_id.to_numpy()
+    mmsi = points.mmsi.to_numpy()
+    vclass_of = _track_vessel_class(points)
     bounds = np.flatnonzero(np.r_[True, tid[1:] != tid[:-1], True])
-    for a, b in zip(bounds[:-1], bounds[1:]):
+    n_tracks = len(bounds) - 1
+    acc: dict[str, list[np.ndarray]] = {k: [] for k in
+                                        ("track_id", "mmsi", "t", "lat", "lon", "sog", "cog", "heading",
+                                         "vessel_class", "valid", "feat_valid", "feats")}
+    for k, (a, b) in enumerate(zip(bounds[:-1], bounds[1:])):
+        if k and k % 20000 == 0:
+            log.info("resampled %d of %d tracks", k, n_tracks)
         r = resample_track(t_all[a:b], *(cols[c][a:b] for c in ("lat", "lon", "sog", "cog", "heading")), cfg=cfg)
         if r is None:
             continue
+        n = len(r["t"])
         feats = step_features(r["lat"], r["lon"], r["sog"], r["cog"], r["heading"])
-        ok = r["valid"].copy()
-        feat_valid = ok & np.r_[False, ok[:-1]] & np.isfinite(feats).all(axis=1)
-        vt = points.vessel_type.iloc[a:b].dropna()
-        part = pd.DataFrame({k: r[k] for k in ("lat", "lon", "sog", "cog", "heading")})
-        part.insert(0, "t", pd.to_datetime(r["t"], unit="s"))
-        part.insert(0, "mmsi", int(points.mmsi.iat[a]))
-        part.insert(0, "track_id", int(tid[a]))
-        part["vessel_class"] = vessel_class(vt.mode().iat[0]) if len(vt) else 0
-        part["valid"] = r["valid"]
-        part["feat_valid"] = feat_valid
-        for i, name in enumerate(FEATURES):
-            part[name] = feats[:, i]
-        parts.append(part)
-    if not parts:
+        ok = r["valid"]
+        acc["track_id"].append(np.full(n, tid[a], dtype=np.int64))
+        acc["mmsi"].append(np.full(n, mmsi[a], dtype=np.int64))
+        acc["vessel_class"].append(np.full(n, vclass_of.get(int(tid[a]), 0), dtype=np.int64))
+        for key in ("t", "lat", "lon", "sog", "cog", "heading"):
+            acc[key].append(r[key])
+        acc["valid"].append(ok)
+        acc["feat_valid"].append(ok & np.r_[False, ok[:-1]] & np.isfinite(feats).all(axis=1))
+        acc["feats"].append(feats)
+    if not acc["t"]:
         raise ValueError("no track survived resampling")
-    return pd.concat(parts, ignore_index=True)
+    cat = {k: np.concatenate(v) for k, v in acc.items()}
+    out = pd.DataFrame(
+        {
+            "track_id": cat["track_id"],
+            "mmsi": cat["mmsi"],
+            "t": pd.to_datetime(cat["t"], unit="s"),
+            **{k: cat[k] for k in ("lat", "lon", "sog", "cog", "heading")},
+            "vessel_class": cat["vessel_class"],
+            "valid": cat["valid"],
+            "feat_valid": cat["feat_valid"],
+        }
+    )
+    for i, name in enumerate(FEATURES):
+        out[name] = cat["feats"][:, i]
+    return out
 
 
 # ------------------------------------------------------------------ windows
 
 def make_windows(tracks: pd.DataFrame, cfg: PreprocessConfig) -> pd.DataFrame:
-    """Index of windows over fully valid steps. row0 points into `tracks`."""
+    """Index of windows over fully valid steps. row0 points into `tracks`.
+
+    Linear time: find each maximal run of valid steps within a track from its
+    start and end positions, then lay windows along it with np.repeat. (The
+    first version rescanned every row once per run, which is quadratic and
+    never finished on three months of real data.)
+    """
     L, stride = cfg.window_len, cfg.window_stride
-    fv = tracks.feat_valid.to_numpy()
+    fv = tracks.feat_valid.to_numpy(dtype=bool)
     tid = tracks.track_id.to_numpy()
-    # A run breaks at an invalid step or a track boundary.
-    breaks = ~fv | np.r_[True, tid[1:] != tid[:-1]]
-    run_id = np.cumsum(breaks)
-    starts = []
-    for rid in np.unique(run_id[fv]):
-        idx = np.flatnonzero((run_id == rid) & fv)
-        if idx.size >= L:
-            starts.extend(idx[0] + np.arange(0, idx.size - L + 1, stride))
-    row0 = np.array(starts, dtype=np.int64)
+    same_next = np.r_[tid[1:] == tid[:-1], False]
+    same_prev = np.r_[False, tid[1:] == tid[:-1]]
+    run_start = fv & ~(np.r_[False, fv[:-1]] & same_prev)
+    run_end = fv & ~(np.r_[fv[1:], False] & same_next)
+    starts, ends = np.flatnonzero(run_start), np.flatnonzero(run_end)
+    lengths = ends - starts + 1
+    fits = lengths >= L
+    starts, lengths = starts[fits], lengths[fits]
+    counts = (lengths - L) // stride + 1
+    offsets = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
+    row0 = (np.repeat(starts, counts) + stride * offsets).astype(np.int64)
     if row0.size == 0:
         return pd.DataFrame(columns=["window_id", "row0", "track_id", "mmsi", "vessel_class", "t_start", "t_end",
                                      "mean_sog", "is_stationary"])
@@ -296,7 +336,8 @@ def assign_splits(windows: pd.DataFrame, cutoff: pd.Timestamp, cfg: PreprocessCo
     Everything else (held-out vessels before the cutoff, training vessels after
     it) is 'unused', so no vessel and no time period appears on both sides.
     """
-    u = windows.mmsi.map(lambda m: _unit_hash(m, cfg.split_seed)).to_numpy()
+    vessels = windows.mmsi.unique()
+    u = windows.mmsi.map(dict(zip(vessels, (_unit_hash(m, cfg.split_seed) for m in vessels)))).to_numpy()
     holdout = u < cfg.holdout_frac
     late = windows.t_start.to_numpy() >= np.datetime64(cutoff)
     # Windows that straddle the cutoff are dropped from training.
@@ -347,16 +388,29 @@ def run(interim_dir: Path, out_dir: Path, cfg: PreprocessConfig | None = None) -
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    clock0 = time.perf_counter()
+
+    def stage(name: str) -> None:
+        log.info("%-10s done at %6.0fs", name, time.perf_counter() - clock0)
+
     raw = load_interim(interim_dir)
+    stage("load")
     points, stats = clean(raw, cfg)
+    del raw
+    stage("clean")
     points, gaps = segment(points, cfg)
     stats["tracks"] = int(points.track_id.nunique())
     stats["gap_events"] = int(len(gaps))
+    stage("segment")
+    log.info("resampling %d tracks", stats["tracks"])
     tracks = resample(points, cfg)
+    del points
     stats["grid_rows"] = int(len(tracks))
     stats["grid_valid_frac"] = float(tracks.feat_valid.mean())
+    stage("resample")
 
     windows = make_windows(tracks, cfg)
+    stage("windows")
     if cfg.split_cutoff:
         cutoff = pd.Timestamp(cfg.split_cutoff)
     else:
@@ -373,12 +427,14 @@ def run(interim_dir: Path, out_dir: Path, cfg: PreprocessConfig | None = None) -
         raise ValueError("no training windows; check the date range and split settings")
     norm = Normalizer.fit(window_array(tracks, train.row0.to_numpy(), cfg.window_len, FEATURES))
 
+    stage("split+norm")
     tracks.to_parquet(out_dir / "tracks.parquet", index=False)
     windows.to_parquet(out_dir / "windows.parquet", index=False)
     gaps.to_parquet(out_dir / "gaps.parquet", index=False)
     norm.save(out_dir / "normalizer.json")
     stats["config"] = asdict(cfg)
     (out_dir / "stats.json").write_text(json.dumps(stats, indent=2, default=str))
+    stage("write")
     log.info("done: %s", {k: v for k, v in stats.items() if k != "config"})
     return stats
 

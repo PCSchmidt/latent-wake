@@ -151,3 +151,41 @@ def test_raw_fields_line_up_with_features(processed):
 
     f = step_features(raw["lat"][0], raw["lon"][0], raw["sog"][0], raw["cog"][0], raw["heading"][0])
     np.testing.assert_allclose(f[1:, :2], X[0, 1:, :2], atol=0.05)  # meters
+
+
+def _windows_reference(fv, tid, L, stride):
+    """Slow, obviously-correct windowing used to check the fast version."""
+    starts, i, n = [], 0, len(fv)
+    while i < n:
+        if not fv[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and fv[j + 1] and tid[j + 1] == tid[i]:
+            j += 1
+        starts.extend(range(i, j - L + 2, stride))
+        i = j + 1
+    return starts
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_fast_windows_match_reference(seed):
+    rng = np.random.default_rng(seed)
+    n = 5000
+    tid = np.cumsum(rng.random(n) < 0.01)
+    fv = rng.random(n) > 0.005
+    tracks = pd.DataFrame({"track_id": tid, "mmsi": 366000001, "vessel_class": 1,
+                           "t": pd.date_range("2025-04-01", periods=n, freq="2min"), "sog_kn": 5.0, "feat_valid": fv})
+    assert pp.make_windows(tracks, CFG).row0.tolist() == _windows_reference(fv, tid, 64, 16)
+
+
+def test_windowing_scales_linearly():
+    import time
+
+    n = 2_000_000
+    rng = np.random.default_rng(0)
+    tracks = pd.DataFrame({"track_id": np.cumsum(rng.random(n) < 0.003), "mmsi": 366000001, "vessel_class": 1,
+                           "t": pd.Timestamp("2025-04-01"), "sog_kn": 5.0, "feat_valid": rng.random(n) > 0.002})
+    t0 = time.perf_counter()
+    pp.make_windows(tracks, CFG)
+    assert time.perf_counter() - t0 < 5.0  # the quadratic version took hours at this size
