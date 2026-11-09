@@ -2,6 +2,13 @@
 
 *Project scope, November 5, 2026. Chris Schmidt.*
 
+> **Updates since this scope (2026-11-09).** This is the original plan, kept as written. What changed:
+> the region is Chesapeake Bay and Hampton Roads; the main study uses Class A transceivers only;
+> scoring uses per-stratum validation tail probabilities rather than per-type z-scores; behavioral
+> anomalies go only into moving cargo, tanker, and passenger vessels; rendezvous and identity swaps
+> were not built. The success criteria became the pre-registered margins in `DATA_CONTRACT.md`, and the
+> one test scoring met 3 of 8 (`EVAL_RESULTS.md`). Every change and its reason is in `DECISIONS.md`.
+
 ## Summary
 
 Latent Wake trains a small JEPA world model on normal vessel motion from public AIS data, then flags tracks where the model is surprised. It runs entirely on a Dell Precision 7770 (RTX A4500, 16 GB VRAM), in about 12 weeks of part-time work.

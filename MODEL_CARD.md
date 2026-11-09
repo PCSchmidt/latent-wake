@@ -87,6 +87,10 @@ model," not "wrongdoing."
 - **Thresholds do not transfer between vessels.** Validation thresholds for a
   1% budget gave about 5% false alarms on test vessels (about 10% on vessels
   under way). Recalibrate on the target fleet before any use.
+- **False alarms cluster in a few vessels.** Post hoc, a handful of fishing
+  vessels under way trip every detector; the JEPA also over-alarms on anchored
+  cargo ships and "other" vessels where the baselines do not, which is
+  unexplained so far.
 - **Small strata.** Tanker strata have fewer than 200 validation windows and
   fall back to coarser calibration groups.
 - **Location is not used.** A learned location embedding helped route

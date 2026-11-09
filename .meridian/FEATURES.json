@@ -6,8 +6,8 @@
     "lifecycle": {
       "happy_path": true,
       "integration": true,
-      "edge_cases": false,
-      "error_handling": false,
+      "edge_cases": true,
+      "error_handling": true,
       "hardening": false
     }
   },
@@ -17,10 +17,10 @@
     "source_section": "Anomaly Test Sets",
     "lifecycle": {
       "happy_path": true,
-      "integration": false,
-      "edge_cases": false,
-      "error_handling": false,
-      "hardening": false
+      "integration": true,
+      "edge_cases": true,
+      "error_handling": true,
+      "hardening": true
     }
   },
   {
@@ -29,7 +29,7 @@
     "source_section": "Model Training",
     "lifecycle": {
       "happy_path": true,
-      "integration": false,
+      "integration": true,
       "edge_cases": false,
       "error_handling": false,
       "hardening": false
@@ -41,7 +41,7 @@
     "source_section": "Baselines",
     "lifecycle": {
       "happy_path": true,
-      "integration": false,
+      "integration": true,
       "edge_cases": false,
       "error_handling": false,
       "hardening": false
@@ -53,9 +53,9 @@
     "source_section": "Model Evaluation",
     "lifecycle": {
       "happy_path": true,
-      "integration": false,
-      "edge_cases": false,
-      "error_handling": false,
+      "integration": true,
+      "edge_cases": true,
+      "error_handling": true,
       "hardening": false
     }
   },
