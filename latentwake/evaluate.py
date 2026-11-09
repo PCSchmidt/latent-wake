@@ -290,7 +290,7 @@ def run(
     out: Path,
     fuse_with_kalman: str | None = None,
     alert_fpr: float = 0.01,
-    calibration: str = "mad",
+    calibration: str = "tail",
 ) -> pd.DataFrame:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -330,8 +330,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--fuse-with-kalman", default=None, metavar="PREFIX",
                    help="also score max(model z, Kalman z) for models named PREFIX or PREFIX-sN")
     p.add_argument("--alert-fpr", type=float, default=0.01, help="validation false-alarm budget for thresholds")
-    p.add_argument("--calibration", choices=CALIBRATIONS, default="mad",
-                   help="window-score calibration: mad (contract v2) or tail (validation tail probability)")
+    p.add_argument("--calibration", choices=CALIBRATIONS, default="tail",
+                   help="window-score calibration: tail (contract v2.1) or mad (median/MAD z, contract v2)")
     a = p.parse_args(argv)
     models = dict(m.split("=", 1) for m in a.model)
     run(a.testset, a.processed, {k: Path(v) for k, v in models.items()}, a.out, a.fuse_with_kalman, a.alert_fpr,

@@ -2,7 +2,7 @@
 
 **Project:** Latent Wake: JEPA surprise detection for maritime vessel tracks
 **Owner:** Chris Schmidt
-**Date:** 2026-11-07; amended 2026-11-09 (version 2, see the amendment log at the end; owner re-approval of the `data_contract` gate pending)
+**Date:** 2026-11-07; amended 2026-11-09 (versions 2 and 2.1, see the amendment log at the end; owner re-approval of the `data_contract` gate pending)
 **Framework:** Meridian (ml-research recipe)
 
 This document is the single source of truth for what this experiment is trying
@@ -127,11 +127,15 @@ against moving normal windows of those same classes. Kinematic kinds are
 injected into all Class A vessels and scored against all normal windows.
 
 **The combined detector (`fused`)** is fixed before any real data and fits
-nothing to a test set. Each detector's window score is turned into a robust
-z-score per stratum, vessel class × under way (mean reported speed in the
-window at least 1 knot), using validation windows (median and MAD). Version 1
-used vessel class alone. The
-fused score is the larger of the JEPA's z and the Kalman filter's z.
+nothing to a test set. Every detector's window score, baselines included,
+is turned into -log10 of its validation tail probability within its stratum,
+vessel class × under way (mean reported speed in the window at least 1 knot):
+the empirical survival function up to the stratum's largest validation
+score, an exponential tail beyond it (`TailCalibrator` in
+`latentwake/score.py`). Strata under 200 validation windows fall back to the
+under-way or stopped group, then to all windows. The fused score is the
+larger of the JEPA's and the Kalman filter's calibrated scores. Version 1
+used median/MAD z-scores per vessel class; version 2 per stratum.
 Implemented in `latentwake/evaluate.py` (`model_scores`); `jepa-sN` yields
 `fused-sN`.
 
@@ -316,3 +320,26 @@ test set v2 is built from the Class A data and frozen before any version 2
 model trains. The `data_contract` and `pipeline_validated` gates are reopened
 (`scripts/reopen-gate.sh`) and passed again. Every model is retrained on the
 Class A data after test set v2 freezes; `run-benchmark.sh` enforces the order.
+
+### Version 2.1, 2026-11-09 (owner decision, on agent recommendation)
+
+**Why.** On the validation anomaly set, median/MAD window z-scores per
+stratum sent 99% of the fused detector's alerts to stopped windows: strata
+whose normal scores barely vary got huge z-scores and used the whole alert
+budget, so the fused detector never alerted on a moving ship. The baselines
+were also scored uncalibrated while the models were calibrated per stratum,
+which handicapped the Kalman comparison. The test set was not scored.
+
+| # | Change | Where |
+|---|--------|-------|
+| 5 | Every detector, baselines included, is calibrated as a per-stratum validation tail probability. The fusion rule's form (larger of the two calibrated scores) and the 1% validation alert budget are unchanged. | `TailCalibrator`, `--calibration tail`, `configs/eval.yaml` |
+
+**Unchanged:** every threshold and margin.
+
+**Known cost, recorded before any test scoring.** On the one-seed validation
+run this amendment lowers two results below their margins, because Kalman
+gains more from matched calibration than the JEPA does: JEPA over Kalman on
+behavioral AUROC +0.089 (margin 0.10) and fused over Kalman AUROC +0.022
+(margin 0.03). The other six criteria pass. The margins were kept rather
+than lowered after seeing these results. Seeds 1 and 2 decide the validation
+estimate before the test set is scored once.

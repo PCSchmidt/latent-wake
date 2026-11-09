@@ -146,7 +146,7 @@ python -m latentwake.evaluate --testset data/testsets/chesapeake-test-v2 \
     --model jepa=runs/jepa-s0/best.pt --model raw=runs/raw-s0/best.pt
 ```
 
-Always includes two non-learned baselines: a physics residual (observed motion versus reported speed and course) and a constant-velocity Kalman filter that observes position and reported velocity and scores each step by normalized innovation squared. Every detector is calibrated per stratum, vessel class × under way (mean reported speed ≥ 1 kn), on the validation split (median and MAD), so a fishing boat's jitter isn't scored like a tanker's and an anchored tanker isn't scored like one in the channel. Writes AUROC and AUPRC per anomaly cell to `results.csv` and `summary.md`.
+Always includes two non-learned baselines: a physics residual (observed motion versus reported speed and course) and a constant-velocity Kalman filter that observes position and reported velocity and scores each step by normalized innovation squared. Every detector, baselines included, is calibrated per stratum, vessel class × under way (mean reported speed ≥ 1 kn), as its validation tail probability (contract v2.1), so a fishing boat's jitter isn't scored like a tanker's, an anchored tanker isn't scored like one in the channel, and a 1% alert budget spreads across strata instead of piling onto the ones whose scores barely vary. `--calibration mad` gives the older median/MAD z-scores. Writes AUROC and AUPRC per anomaly cell to `results.csv` and `summary.md`.
 
 ### Working offline with synthetic traffic
 
