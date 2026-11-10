@@ -62,7 +62,7 @@ Synthetic anomalies (position spoof, teleport, AIS gap, route deviation, loiteri
 
 - **Baselines built:** physics residual, Kalman-filter innovation (observes position and reported velocity), and the same predictor on raw features (the key JEPA ablation). **Planned:** Isolation Forest, LSTM autoencoder, TrAISformer-style forecaster.
 - **Metrics:** AUROC and AUPRC per anomaly type and severity level; false-alarm and detection rates at a 1% validation alert budget. **Planned:** severity curves as figures, false alarms per 1,000 vessel-hours, time to detect.
-- **Ablations (next):** SIGReg weight, SIGReg vs. VICReg vs. EMA/stop-gradient, action conditioning on/off, context length, latent size. Attention pooling, 4-step chunks, and location context were already compared on validation ([`reports/validation-v2.md`](reports/validation-v2.md)).
+- **Ablations ([`ABLATION_RESULTS.md`](ABLATION_RESULTS.md), validation):** SIGReg weight (0, 0.02, 0.09, 0.3), action conditioning on/off, raw vs. latent target, anchored-window share, latent size, context length. SIGReg prevents collapse; action conditioning carries the prediction; latent prediction helps loitering and costs kinematic detection; a 64-dim latent matches the main model on behavioral kinds and beats it on kinematic ones. VICReg and EMA/stop-gradient deferred. Attention pooling, 4-step chunks, and location context were already compared on validation ([`reports/validation-v2.md`](reports/validation-v2.md)).
 - **Rigor:** 3 seeds per configuration; test set frozen before the first model run and scored once; pre-registered criteria; vessel-level bootstrap intervals.
 
 ## Roadmap
@@ -71,7 +71,7 @@ Synthetic anomalies (position spoof, teleport, AIS gap, route deviation, loiteri
 | --- | --- | --- | --- |
 | 1. Data pipeline and test sets | 1–3 | Test sets frozen before any model run | Done (`data_contract`, `pipeline_validated`) |
 | 2. JEPA and quick baselines | 4–6 | JEPA trains without collapse across 3 seeds | Done (`training_stable`); test set scored, `model_eval` pending owner approval |
-| 3. Full evaluation and ablations | 7–9 | Results tables frozen | Next (`ablation_study`) |
+| 3. Full evaluation and ablations | 7–9 | Results tables frozen | Ablations done ([`ABLATION_RESULTS.md`](ABLATION_RESULTS.md)); `ablation_study` pending owner approval; remaining baselines next |
 | 4. Darkwater demo panel and write-up | 10–12 | Repo, write-up, and demo shipped | Not started (`demo_shipped`) |
 
 ## Repository layout

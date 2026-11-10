@@ -75,8 +75,9 @@ SIGReg weight, SIGReg versus VICReg versus EMA, action on/off, context length,
 and latent size, three seeds each. "Done" means ABLATION_RESULTS.md explains
 what each component contributes and `ablation_study` is approved.
 
-**Status:** next. Pooling, chunk length, and location context were compared
-on validation during model selection (reports/validation-v2.md).
+**Status:** done on validation (ABLATION_RESULTS.md), three seeds where
+results were close; `ablation_study` pending owner approval. VICReg and
+EMA/stop-gradient deferred.
 
 ---
 
