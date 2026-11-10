@@ -307,8 +307,14 @@ def test_posthoc_reproduces_recorded_rates_and_bootstraps(processed, tmp_path):
     contract = _write(tmp_path, FILLED)
     cfg = tmp_path / "eval.yaml"
     cfg.write_text(yaml.safe_dump({"testset": str(ts_dir), "processed": str(p), "out": str(out),
-                                   "models": {}, "contract": str(contract)}))
+                                   "models": {}, "contract": str(contract), "interim": str(processed / "interim")}))
     dest = posthoc.run(cfg, n_boot=20)
+    by_type = pd.read_csv(dest / "false_alarms_by_ais_type.csv")
+    for m in scores:  # shares of each method's false alarms sum to one
+        assert by_type[m].sum() == pytest.approx(1.0) or by_type[m].sum() == 0
+    top = pd.read_csv(dest / "top_alarming_vessels.csv")
+    assert {"mmsi", "ais_type", "lat", "lon"} <= set(top.columns)
+    assert top.lat.between(36.6, 39.7).all()
 
     normal = (ts.cells.kind == "normal").to_numpy()
     rec = json.loads((dest / "thresholds.json").read_text())
