@@ -171,13 +171,24 @@ Always includes two non-learned baselines: a physics residual (observed motion v
 
 Use `latentwake.evaluate` directly only on validation anomaly sets. The frozen test set is scored through `bash scripts/run-benchmark.sh`, which reads `configs/eval.yaml`, records its inputs, and refuses to score the test set a second time with different ones. `python -m latentwake.checks report` writes EVAL_RESULTS.md from what it recorded.
 
+### Learned baselines
+
+```bash
+python -m latentwake.select_baselines grid                  # Isolation Forest, LSTM-AE, TrAISformer-style; seed 0
+python -m latentwake.select_baselines evaluate              # validation anomaly set only
+python -m latentwake.select_baselines select --train-seeds  # winner per kind, then seeds 1 and 2
+python -m latentwake.checks benchmark configs/eval-baselines.yaml   # one recorded test scoring
+```
+
+Settings are picked on validation by a rule fixed in advance (DECISIONS.md); the test scoring is recorded and refuses a second look like the main benchmark. Each baseline scores a window with one number (Isolation Forest on window statistics; LSTM-autoencoder and TrAISformer-style per-step error or negative log-likelihood, maximum over the window) and is calibrated like every other detector.
+
 ### Step 6: post-hoc analysis
 
 ```bash
 python -m latentwake.posthoc
 ```
 
-Exploratory, from the saved scores only: a cluster bootstrap over source vessels for each criterion difference, and test false alarms by stratum and by vessel. It never re-scores the test set and does not change the verdict.
+Exploratory, from the saved scores only: a cluster bootstrap over source vessels for each criterion difference; test false alarms by stratum, by vessel, and by each vessel's AIS ship-type code (pilot boats and dredges sit in the "other" class); and the most-alarming vessels with their typical position. It never re-scores the test set and does not change the verdict.
 
 ### Working offline with synthetic traffic
 

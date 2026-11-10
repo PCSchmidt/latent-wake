@@ -79,17 +79,17 @@ def train_seeds(table: pd.DataFrame, processed: Path, grid_dir: Path = GRID_DIR,
     from latentwake.train_baseline import main as train
 
     for _, r in table[table.chosen].iterrows():
-        short = SHORT[r.kind]
+        kind, tag, flags = r["kind"], r["tag"], r["flags"].split()  # r.flags is pandas' own attribute
+        short = SHORT[kind]
         s0 = runs / f"{short}-s0"
         if not s0.exists():
-            shutil.copytree(grid_dir / f"{r.kind}_{r.tag}", s0)
+            shutil.copytree(grid_dir / f"{kind}_{tag}", s0)
         for seed in (1, 2):
             out = runs / f"{short}-s{seed}"
             if (out / "baseline.pt").exists():
                 continue
-            print(f"--- {short} seed {seed} ({r.flags})", flush=True)
-            train(["--kind", r.kind, "--processed", str(processed), "--out", str(out), "--seed", str(seed),
-                   *r.flags.split()])
+            print(f"--- {short} seed {seed} ({' '.join(flags)})", flush=True)
+            train(["--kind", kind, "--processed", str(processed), "--out", str(out), "--seed", str(seed), *flags])
 
 
 def main(argv: list[str] | None = None) -> None:
