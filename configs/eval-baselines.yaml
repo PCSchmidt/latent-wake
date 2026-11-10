@@ -1,0 +1,24 @@
+# Recorded test scoring of the learned baselines (Isolation Forest, LSTM
+# autoencoder, TrAISformer-style), separate from the main benchmark in
+# configs/eval.yaml. Settings were chosen on validation first
+# (latentwake.select_baselines; rule in DECISIONS.md, 2026-11-10).
+# Run: python -m latentwake.checks benchmark configs/eval-baselines.yaml
+interim: data/interim/chesapeake
+processed: data/processed/chesapeake
+testset: data/testsets/chesapeake-test-v2
+out: reports/eval-v2-baselines
+contract: DATA_CONTRACT.md
+fuse_with_kalman: null
+alert_fpr: 0.01
+calibration: tail
+
+models:
+  iforest-s0: runs/iforest-s0/baseline.pt
+  iforest-s1: runs/iforest-s1/baseline.pt
+  iforest-s2: runs/iforest-s2/baseline.pt
+  lstmae-s0: runs/lstmae-s0/baseline.pt
+  lstmae-s1: runs/lstmae-s1/baseline.pt
+  lstmae-s2: runs/lstmae-s2/baseline.pt
+  trais-s0: runs/trais-s0/baseline.pt
+  trais-s1: runs/trais-s1/baseline.pt
+  trais-s2: runs/trais-s2/baseline.pt

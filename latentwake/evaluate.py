@@ -306,6 +306,23 @@ def run(
         for m in list(scores):
             scores[m] = _window_z(val_scores[m], key_val, scores[m], key_test, "tail")
             val_scores[m] = _window_z(val_scores[m], key_val, val_scores[m], key_val, "tail")
+    # Learned baselines (Isolation Forest, LSTM autoencoder, TrAISformer-style)
+    # produce window scores directly and are calibrated like physics and Kalman.
+    from latentwake.models.learned_baselines import LearnedBaseline, is_baseline
+
+    baselines = {k: v for k, v in models.items() if is_baseline(Path(v))}
+    models = {k: v for k, v in models.items() if k not in baselines}
+    if baselines:
+        vclass_test, vclass_val = test_vessel_class(ts, processed), meta_val.vessel_class.to_numpy()
+        key_test = strata(vclass_test, ts.X)
+        for name, path in baselines.items():
+            b = LearnedBaseline.load(Path(path))
+            t_raw, v_raw = b.window_scores(ts.X, vclass_test), b.window_scores(X_val_raw, vclass_val)
+            if calibration == "tail":
+                scores[name] = _window_z(v_raw, key_val, t_raw, key_test, "tail")
+                val_scores[name] = _window_z(v_raw, key_val, v_raw, key_val, "tail")
+            else:
+                scores[name], val_scores[name] = t_raw, v_raw
     if models:
         t, v = model_scores(models, ts, processed, fuse_with_kalman, kalman_val=raw_kalman_val,
                             X_val_raw=X_val_raw, calibration=calibration)
