@@ -1,5 +1,6 @@
 {
   "passed_gates": [
+    "ablation_study",
     "data_contract",
     "model_eval",
     "pipeline_validated",
@@ -13,6 +14,10 @@
     "model_eval": {
       "by": "Chris Schmidt",
       "at": "2026-11-09T23:39:47Z"
+    },
+    "ablation_study": {
+      "by": "Chris Schmidt",
+      "at": "2026-11-10T23:34:06Z"
     }
   },
   "approval_history": [
