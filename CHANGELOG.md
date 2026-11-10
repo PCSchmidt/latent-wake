@@ -3,6 +3,15 @@
 Changes to what the project measures and how, newest first. Code-level
 detail is in the git history and pull requests; reasons are in DECISIONS.md.
 
+## 2026-11-10: ablations (validation only)
+
+- Nine ablations on the validation anomaly set, three seeds where a result
+  landed within 0.02 of the main model (ABLATION_RESULTS.md). SIGReg prevents
+  collapse and is insensitive to its weight; action conditioning carries the
+  prediction; latent prediction helps loitering and costs kinematic
+  detection; no setting improves the behavioral mean. A 64-dim latent matches
+  the main model on behavioral kinds and beats it on kinematic ones.
+
 ## 2026-11-09: test set v2 scored once
 
 - Frozen test set v2 (sha256 826137bdb526) scored once by `run-benchmark.sh`
