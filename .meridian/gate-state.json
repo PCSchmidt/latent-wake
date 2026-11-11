@@ -2,6 +2,7 @@
   "passed_gates": [
     "ablation_study",
     "data_contract",
+    "demo_shipped",
     "model_eval",
     "pipeline_validated",
     "training_stable"
@@ -18,6 +19,10 @@
     "ablation_study": {
       "by": "Chris Schmidt",
       "at": "2026-11-10T23:34:06Z"
+    },
+    "demo_shipped": {
+      "by": "Chris Schmidt",
+      "at": "2026-11-11T13:42:21Z"
     }
   },
   "approval_history": [
