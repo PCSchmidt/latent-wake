@@ -3,6 +3,12 @@
 Changes to what the project measures and how, newest first. Code-level
 detail is in the git history and pull requests; reasons are in DECISIONS.md.
 
+## 2026-11-11: shipped
+
+- Darkwater's Latent Wake page published from the exported sample
+  (pcschmidt.github.io/darkwater/latent-wake.html).
+- `demo_shipped` approved; all six gates passed.
+
 ## 2026-11-11: Darkwater panel export
 
 - `latentwake.export_panel` writes an anonymized sample of the scored test

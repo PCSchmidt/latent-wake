@@ -6,7 +6,7 @@ Latent Wake trains a small Joint-Embedding Predictive Architecture (JEPA) world 
 
 The model follows the [LeWorldModel](https://arxiv.org/abs/2603.19312) recipe (a next-latent prediction loss plus the SIGReg Gaussian regularizer, with no EMA, stop-gradient, or pretrained encoder), ported from pixels to trajectories. It is sized to train on a single laptop GPU (RTX A4500, 16 GB).
 
-> **Status (2026-11-09):** Phase 2 of 4, ahead of the 12-week plan. The pipeline ran on three months of real NOAA data, three seeds trained without collapse, and the frozen test set was scored once: **3 of 8 pre-registered criteria met** (see [Results](#results)). Next: ablations, the remaining baselines, then the Darkwater panel and write-up. The original plan is in [`docs/SCOPE.md`](docs/SCOPE.md).
+> **Status (2026-11-11): shipped**, all six gates passed, well ahead of the 12-week plan. The frozen test set was scored once: **3 of 8 pre-registered criteria met** (see [Results](#results)). Read the [write-up](docs/WRITEUP.md) or try the [live panel](https://pcschmidt.github.io/darkwater/latent-wake.html) in Darkwater. The original plan is in [`docs/SCOPE.md`](docs/SCOPE.md).
 
 ## Why
 
@@ -75,9 +75,9 @@ Synthetic anomalies (position spoof, teleport, AIS gap, route deviation, loiteri
 | Phase | Weeks | Gate | Status |
 | --- | --- | --- | --- |
 | 1. Data pipeline and test sets | 1–3 | Test sets frozen before any model run | Done (`data_contract`, `pipeline_validated`) |
-| 2. JEPA and quick baselines | 4–6 | JEPA trains without collapse across 3 seeds | Done (`training_stable`); test set scored, `model_eval` pending owner approval |
-| 3. Full evaluation and ablations | 7–9 | Results tables frozen | Ablations done ([`ABLATION_RESULTS.md`](ABLATION_RESULTS.md)); `ablation_study` pending owner approval; remaining baselines next |
-| 4. Darkwater demo panel and write-up | 10–12 | Repo, write-up, and demo shipped | Not started (`demo_shipped`) |
+| 2. JEPA and quick baselines | 4–6 | JEPA trains without collapse across 3 seeds | Done (`training_stable`, `model_eval`) |
+| 3. Full evaluation and ablations | 7–9 | Results tables frozen | Done (`ablation_study`); [`ABLATION_RESULTS.md`](ABLATION_RESULTS.md); learned baselines scored |
+| 4. Darkwater demo panel and write-up | 10–12 | Repo, write-up, and demo shipped | Done (`demo_shipped`); [write-up](docs/WRITEUP.md), [panel](https://pcschmidt.github.io/darkwater/latent-wake.html) |
 
 ## Repository layout
 

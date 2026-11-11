@@ -65,8 +65,9 @@ DATA_CONTRACT.md. "Done" means EVAL_RESULTS.md and MODEL_CARD.md are complete
 and `model_eval` is approved; the gate records the verdict, pass or fail.
 
 **Status:** test set scored once on 2026-11-09, 3 of 8 criteria met;
-EVAL_RESULTS.md, MODEL_CARD.md, and a post-hoc analysis written; owner
-approval pending. OMTAD numbers and severity figures not started.
+EVAL_RESULTS.md, MODEL_CARD.md, and a post-hoc analysis written;
+`model_eval` approved. Severity figures in docs/WRITEUP.md. OMTAD numbers not
+done.
 
 ---
 
@@ -77,8 +78,8 @@ and latent size, three seeds each. "Done" means ABLATION_RESULTS.md explains
 what each component contributes and `ablation_study` is approved.
 
 **Status:** done on validation (ABLATION_RESULTS.md), three seeds where
-results were close; `ablation_study` pending owner approval. VICReg and
-EMA/stop-gradient deferred.
+results were close; `ablation_study` approved. VICReg and EMA/stop-gradient
+deferred.
 
 ---
 
@@ -88,6 +89,11 @@ Precomputed scores for a replay week, loaded into Darkwater as a panel of
 vessels ranked by surprise with the track and spike shown. "Done" means the
 panel is live on GitHub Pages.
 
+**Status:** done. Darkwater's Latent Wake page shows an anonymized sample of
+the scored test set (not a replay week): tracks, alerts per detector at the
+1% budget, injected truth, per-step surprise, and the recorded scoreboard.
+Live at pcschmidt.github.io/darkwater/latent-wake.html.
+
 ---
 
 ## Write-up
@@ -95,3 +101,6 @@ panel is live on GitHub Pages.
 Results, figures, and reproduction instructions on pcschmidt.github.io, with
 code, configs, and weights linked. "Done" means docs/WRITEUP.md is published
 and `demo_shipped` is approved.
+
+**Status:** done; docs/WRITEUP.md, `demo_shipped` approved 2026-11-11. Weights
+are not published.
