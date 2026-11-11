@@ -7,7 +7,7 @@ Full results: [`EVAL_RESULTS.md`](../EVAL_RESULTS.md).*
 ## Summary
 
 I trained a joint-embedding predictive architecture (JEPA) in the style of
-LeWorldModel on three months of AIS vessel tracks from Chesapeake Bay and
+LeWorldModel [1] on three months of AIS vessel tracks from Chesapeake Bay and
 Hampton Roads. It predicts each vessel's next 16 minutes in a learned latent
 space, given what the ship reports about its own speed and course, and flags
 windows it cannot predict. Before scoring the frozen test set, I committed to
@@ -45,11 +45,17 @@ on labeled incidents, which are scarce.
 
 A world model offers a third route: learn what normal traffic looks like from
 unlabeled tracks, and flag what it cannot predict. JEPAs are a recent,
-cheap way to train one. LeWorldModel showed that a JEPA can be trained end to
-end with a single regularizer (SIGReg), without the usual
-collapse-prevention tricks such as an EMA target network. My question was whether the same recipe, applied
-to vessel tracks on a laptop GPU, finds anomalies a strong classical baseline
-misses.
+cheap way to train one. LeWorldModel (Maes, Le Lidec, Scieur, LeCun, and
+Balestriero [1]) trains a JEPA world model end to end from pixels with only
+two loss terms, a next-embedding prediction loss and SIGReg, a regularizer
+that pushes latent embeddings toward an isotropic Gaussian [2]. It needs no
+exponential moving average, stop-gradient, or pretrained encoder. Its authors
+also showed that the model's prediction error, its "surprise", rises when an
+object teleports or changes color in a scene. My question was whether the
+same recipe, applied to vessel tracks on a laptop GPU, turns that surprise
+into an anomaly detector that finds what a strong classical baseline misses.
+A ship teleporting across the bay is the AIS version of their teleporting
+cube.
 
 ## What I built
 
@@ -66,12 +72,14 @@ two disjoint sets of the remaining vessels.
 
 **Model.** Each 8-step chunk of a window is encoded to a 192-dimensional
 latent by a small transformer. A causal predictor, conditioned through
-AdaLN-zero on the *next* chunk's reported speed, course, and heading change,
+adaptive layer norm initialized to zero (AdaLN-zero [3], as in [1]) on the *next* chunk's reported speed, course, and heading change,
 predicts the next latent. Displacement is deliberately left out of that
 conditioning: the model has to infer where the ship goes from what it says it
 is doing, so a position that disagrees with the reports should surprise it.
-The loss is prediction error plus 0.09 × SIGReg, with no EMA target or
-stop-gradient. 10.1 million parameters, about 40 minutes per seed on an RTX
+The loss is prediction error plus 0.09 × SIGReg (17 knots, 1,024 random
+projections; the LeWorldModel defaults), with no EMA target or stop-gradient.
+SIGReg and the transformer blocks are adapted from the LeWorldModel code [4]
+(MIT License). 10.1 million parameters, about 40 minutes per seed on an RTX
 A4500.
 
 **Anomalies.** There is no labeled ground truth at this scale, so anomalies
@@ -86,7 +94,7 @@ against normal windows from the same population.
 both position and reported velocity, the same predictor trained on raw
 features instead of latents (the key JEPA ablation), and, after the main
 scoring, an Isolation Forest, an LSTM autoencoder, and a TrAISformer-style
-forecaster. The forecaster bins each step's motion, speed, and course,
+forecaster after TrAISformer [5]. The forecaster bins each step's motion, speed, and course,
 predicts the next step's bins with a causal transformer, and scores a window
 by its least likely step. Unlike TrAISformer it uses relative motion rather
 than absolute positions, to match everything else here.
@@ -261,3 +269,23 @@ post-hoc analysis. Decisions and their reasons are in
 [`ABLATION_RESULTS.md`](../ABLATION_RESULTS.md); the model card in
 [`MODEL_CARD.md`](../MODEL_CARD.md). The figures are drawn from committed
 results by `python scripts/make_writeup_figures.py`.
+
+## References
+
+1. Lucas Maes, Quentin Le Lidec, Damien Scieur, Yann LeCun, and Randall
+   Balestriero. *LeWorldModel: Stable End-to-End Joint-Embedding Predictive
+   Architecture from Pixels.* arXiv:2603.19312, 2026.
+   [arxiv.org/abs/2603.19312](https://arxiv.org/abs/2603.19312) ·
+   project page [le-wm.github.io](https://le-wm.github.io/)
+2. Randall Balestriero and Yann LeCun. *LeJEPA: Provable and Scalable
+   Self-Supervised Learning Without the Heuristics.* arXiv:2511.08544, 2025.
+   [arxiv.org/abs/2511.08544](https://arxiv.org/abs/2511.08544)
+3. William Peebles and Saining Xie. *Scalable Diffusion Models with
+   Transformers.* ICCV 2023, pp. 4195–4205.
+4. LeWorldModel code: [github.com/lucas-maes/le-wm](https://github.com/lucas-maes/le-wm)
+   (MIT License, copyright 2026 Lucas Maes). Adapted in
+   `latentwake/models/blocks.py`.
+5. Duong Nguyen and Ronan Fablet. *TrAISformer: A Transformer Network with
+   Sparse Augmented Data Representation and Cross Entropy Loss for AIS-based
+   Vessel Trajectory Prediction.* arXiv:2109.03958.
+   [arxiv.org/abs/2109.03958](https://arxiv.org/abs/2109.03958)

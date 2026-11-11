@@ -19,7 +19,7 @@ portfolio use only.
 | Anomaly score | Per-transition prediction error, calibrated per vessel class × under way on validation, max over the window, then converted to a per-stratum validation tail probability |
 | Seeds | 3 (jepa-s0, -s1, -s2); final validation effective rank 125.3 to 125.7 of 192, no collapse warnings |
 | Training | 30 epochs, batch 256, AdamW (lr 3e-4, weight decay 1e-3), cosine schedule with 5% warmup, bf16 autocast; about 40 minutes per seed on one RTX A4500 |
-| Code | `latentwake/models/jepa.py`, `latentwake/train.py`; SIGReg and AdaLN-zero blocks adapted from LeWorldModel (MIT) |
+| Code | `latentwake/models/jepa.py`, `latentwake/train.py`; SIGReg and AdaLN-zero blocks adapted from LeWorldModel ([Maes et al., 2026, arXiv:2603.19312](https://arxiv.org/abs/2603.19312); [code](https://github.com/lucas-maes/le-wm), MIT) |
 
 ## Data
 

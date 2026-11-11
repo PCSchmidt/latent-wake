@@ -232,7 +232,7 @@ Paths for every check live in `configs/eval.yaml`. The checks themselves are in 
 
 ## Acknowledgments
 
-The training recipe builds on [LeWorldModel](https://github.com/lucas-maes/le-wm) by Maes, Le Lidec, Scieur, LeCun, and Balestriero. SIGReg and the AdaLN-zero transformer blocks in `latentwake/models/blocks.py` are adapted from that repository (MIT License, copyright 2026 Lucas Maes).
+The training recipe builds on LeWorldModel by Maes, Le Lidec, Scieur, LeCun, and Balestriero ([paper](https://arxiv.org/abs/2603.19312), [project page](https://le-wm.github.io/), [code](https://github.com/lucas-maes/le-wm)); SIGReg comes from LeJEPA by Balestriero and LeCun ([arXiv:2511.08544](https://arxiv.org/abs/2511.08544)). The TrAISformer-style baseline follows Nguyen and Fablet ([arXiv:2109.03958](https://arxiv.org/abs/2109.03958)). SIGReg and the AdaLN-zero transformer blocks in `latentwake/models/blocks.py` are adapted from that repository (MIT License, copyright 2026 Lucas Maes).
 
 ## License
 
