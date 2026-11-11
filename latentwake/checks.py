@@ -91,7 +91,7 @@ def check_schema(interim: Path) -> None:
     _need(files, f"no cropped daily files in {interim}; run the download step")
     _need(manifest.exists(), f"{manifest} missing; files were not produced by the download step")
     last: dict[str, dict] = {}
-    for line in manifest.read_text().splitlines():
+    for line in manifest.read_text(encoding="utf-8").splitlines():
         rec = json.loads(line)
         last[rec["date"]] = rec  # the latest attempt for each day wins
     failed = sorted(d for d, r in last.items() if r["status"] == "failed")
@@ -112,7 +112,7 @@ def check_preprocessing(processed: Path, min_train_windows: int = 1000) -> None:
     p = Path(processed)
     for name in ("tracks.parquet", "windows.parquet", "gaps.parquet", "normalizer.json", "stats.json"):
         _need((p / name).exists(), f"{p / name} missing; run the preprocessing step")
-    stats = json.loads((p / "stats.json").read_text())
+    stats = json.loads((p / "stats.json").read_text(encoding="utf-8"))
     Normalizer.load(p / "normalizer.json")  # raises if fit on a different feature set
     _ok("outputs present; normalizer matches the feature set")
     _need(stats["grid_valid_frac"] >= 0.5, f"only {stats['grid_valid_frac']:.0%} of grid steps are valid")
@@ -139,7 +139,7 @@ def check_preprocessing(processed: Path, min_train_windows: int = 1000) -> None:
 def check_splits(processed: Path) -> None:
     p = Path(processed)
     w = pd.read_parquet(p / "windows.parquet")
-    cutoff = pd.Timestamp(json.loads((p / "stats.json").read_text())["split_cutoff"])
+    cutoff = pd.Timestamp(json.loads((p / "stats.json").read_text(encoding="utf-8"))["split_cutoff"])
     train, val, test = (w[w.split == s] for s in ("train", "val", "test"))
     _need(set(train.mmsi).isdisjoint(val.mmsi) and set(train.mmsi).isdisjoint(test.mmsi),
           "a vessel appears in both training and evaluation")
@@ -161,7 +161,7 @@ def check_testset(testset: Path, processed: Path) -> None:
         ts = load_test_set(t)
     except ValueError as err:
         raise Blocked(str(err)) from err
-    manifest = json.loads((t / "manifest.json").read_text())
+    manifest = json.loads((t / "manifest.json").read_text(encoding="utf-8"))
     _ok(f"checksum verifies ({manifest['sha256'][:12]}), {len(ts.cells):,} windows")
     _need(manifest.get("frozen_at"), "manifest has no frozen_at time; rebuild with the current code")
     w = pd.read_parquet(Path(processed) / "windows.parquet").set_index("window_id")
@@ -196,12 +196,12 @@ def check_training(cfg_path: Path, min_seeds: int = 3) -> None:
     for name, ckpt in cfg["models"].items():
         run = Path(ckpt).parent
         _need((run / "config.json").exists() and (run / "metrics.jsonl").exists(), f"{name}: run files missing in {run}")
-        model = json.loads((run / "config.json").read_text())["model"]
+        model = json.loads((run / "config.json").read_text(encoding="utf-8"))["model"]
         if model["target"] != "latent" or model["sigreg_weight"] == 0:
             continue
         from latentwake.models.jepa import collapse_signal
 
-        history = [json.loads(line) for line in (run / "metrics.jsonl").read_text().splitlines()]
+        history = [json.loads(line) for line in (run / "metrics.jsonl").read_text(encoding="utf-8").splitlines()]
         last = history[-1]
         _need(np.isfinite(last["val_pred"]), f"{name}: validation loss is not finite")
         reason = collapse_signal([h["val_erank"] for h in history], model["embed_dim"])
@@ -217,21 +217,21 @@ def check_training(cfg_path: Path, min_seeds: int = 3) -> None:
 # ----------------------------------------------------------------- benchmark
 
 def load_eval_config(path: Path) -> dict:
-    cfg = yaml.safe_load(Path(path).read_text())
+    cfg = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     for key in ("testset", "processed", "out", "models"):
         _need(key in cfg, f"{path} is missing '{key}'")
     return cfg
 
 
 def check_freeze_order(cfg: dict) -> None:
-    frozen = json.loads((Path(cfg["testset"]) / "manifest.json").read_text()).get("frozen_at")
+    frozen = json.loads((Path(cfg["testset"]) / "manifest.json").read_text(encoding="utf-8")).get("frozen_at")
     _need(frozen, "test set has no frozen_at time")
     frozen_at = dt.datetime.fromisoformat(frozen)
     _need(cfg["models"], "configs/eval.yaml lists no models")
     for name, ckpt in cfg["models"].items():
         run_cfg = Path(ckpt).parent / "config.json"
         _need(run_cfg.exists(), f"{name}: {run_cfg} missing")
-        started = json.loads(run_cfg.read_text()).get("started_at")
+        started = json.loads(run_cfg.read_text(encoding="utf-8")).get("started_at")
         _need(started, f"{name}: run has no started_at; retrain with the current code")
         _need(dt.datetime.fromisoformat(started) > frozen_at,
               f"{name}: training started {started}, before the test set was frozen at {frozen}")
@@ -248,7 +248,7 @@ def _sha256(path: Path) -> str:
 
 def benchmark_inputs(cfg: dict) -> dict:
     """Everything that determines the test scores. Scoring twice with the same inputs is one look."""
-    manifest = json.loads((Path(cfg["testset"]) / "manifest.json").read_text())
+    manifest = json.loads((Path(cfg["testset"]) / "manifest.json").read_text(encoding="utf-8"))
     return {
         "testset": str(cfg["testset"]),
         "testset_sha256": manifest["sha256"],
@@ -276,7 +276,7 @@ def run_benchmark(cfg_path: Path) -> None:
     inputs = benchmark_inputs(cfg)
     record = out / "benchmark.json"
     if record.exists():
-        prior = json.loads(record.read_text())
+        prior = json.loads(record.read_text(encoding="utf-8"))
         same = {k: v for k, v in prior.items() if k in inputs} == inputs
         _need(same, f"the test set was already scored at {prior.get('scored_at')} with different inputs "
                     f"(see {record}); scoring again would be a second look at the test set")
@@ -354,8 +354,8 @@ def write_eval_results(cfg_path: Path, dest: Path = Path("EVAL_RESULTS.md"), for
     for f in ("benchmark.json", "criteria.json", "summary.md"):
         _need((out / f).exists(), f"{out / f} missing; run run-benchmark.sh and validate-metrics.sh first")
     _need(force or not dest.exists(), f"{dest} exists; pass --force to regenerate it")
-    bench = json.loads((out / "benchmark.json").read_text())
-    verdict = json.loads((out / "criteria.json").read_text())
+    bench = json.loads((out / "benchmark.json").read_text(encoding="utf-8"))
+    verdict = json.loads((out / "criteria.json").read_text(encoding="utf-8"))
     met = sum(r["passed"] for r in verdict["criteria"])
     lines = [
         "# Evaluation results: frozen test set",
@@ -379,9 +379,9 @@ def write_eval_results(cfg_path: Path, dest: Path = Path("EVAL_RESULTS.md"), for
         "",
         "_To be written after reading the numbers; the tables here are generated and are not edited._",
         "",
-        ("\n" + (out / "summary.md").read_text()).replace("\n## ", "\n### ").lstrip("\n"),
+        ("\n" + (out / "summary.md").read_text(encoding="utf-8")).replace("\n## ", "\n### ").lstrip("\n"),
     ]
-    dest.write_text("\n".join(lines))
+    dest.write_text("\n".join(lines), encoding="utf-8")
     _ok(f"wrote {dest}")
 
 

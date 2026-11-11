@@ -333,7 +333,7 @@ def run(
     results.to_csv(out / "results.csv", index=False)
     by_stratum = alerts_by_stratum(val_scores, thresholds, key_val)
     by_stratum.to_csv(out / "val_alerts_by_stratum.csv", index=False)
-    (out / "summary.md").write_text(summarize(results) + summarize_strata(by_stratum))
+    (out / "summary.md").write_text(summarize(results) + summarize_strata(by_stratum), encoding="utf-8")
     np.savez_compressed(out / "scores.npz", **scores)
     return results
 
