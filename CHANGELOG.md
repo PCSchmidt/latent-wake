@@ -3,6 +3,19 @@
 Changes to what the project measures and how, newest first. Code-level
 detail is in the git history and pull requests; reasons are in DECISIONS.md.
 
+## 2026-11-11: learned baselines and ship-type post-hoc check
+
+- Isolation Forest, LSTM autoencoder, and TrAISformer-style forecaster:
+  settings picked on validation by a rule fixed in advance, three seeds each,
+  one separately recorded test scoring (`configs/eval-baselines.yaml`). The
+  TrAISformer-style forecaster matches the JEPA on behavioral anomalies,
+  beats it on kinematic ones, and has the lowest test false-alarm rate (1.6%).
+- Post hoc: four vessels raise 85% of the JEPA's test false alarms (a moored
+  cargo ship, a fishing vessel, a pilot boat, a dredge); dredge false alarms
+  are unique to the JEPA.
+- `latentwake.posthoc --compare` bootstraps pairwise differences across
+  separately recorded benchmarks of the same test set.
+
 ## 2026-11-10: ablations (validation only)
 
 - Nine ablations on the validation anomaly set, three seeds where a result

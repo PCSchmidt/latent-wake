@@ -325,3 +325,30 @@ def test_posthoc_reproduces_recorded_rates_and_bootstraps(processed, tmp_path):
     assert list(boot.criterion) == ["behavioral"]
     assert boot.ci_low.iat[0] <= boot.difference.iat[0] <= boot.ci_high.iat[0]
     assert (dest / "POSTHOC.md").read_text().startswith("# Post-hoc analysis")
+
+
+def test_posthoc_compare_combines_benchmarks(processed, tmp_path):
+    import numpy as np
+    import yaml
+
+    from latentwake import posthoc
+
+    p = processed / "processed"
+    ts_dir = tmp_path / "ts"
+    ts = build_from_processed(p, "test", seed=0, per_cell=3)
+    save_test_set(ts, ts_dir)
+    rng = np.random.default_rng(1)
+    anom = (ts.cells.kind != "normal").to_numpy()
+    cfgs = []
+    for name, sc in (("a", {"jepa-s0": 1.0, "kalman": 0.2}), ("b", {"trais-s0": 2.0, "kalman": 0.2})):
+        out = tmp_path / name
+        out.mkdir()
+        np.savez_compressed(out / "scores.npz",
+                            **{m: rng.normal(size=len(anom)) + shift * anom for m, shift in sc.items()})
+        c = tmp_path / f"{name}.yaml"
+        c.write_text(yaml.safe_dump({"testset": str(ts_dir), "processed": str(p), "out": str(out)}))
+        cfgs.append(c)
+    dest = posthoc.compare(cfgs, [("trais", "jepa")], n_boot=20)
+    t = pd.read_csv(dest / "comparisons.csv")
+    row = t[(t.kinds == "behavioral") & (t.metric == "auroc")].iloc[0]
+    assert row.a_minus_b > 0 and row.ci_low <= row.a_minus_b <= row.ci_high

@@ -87,6 +87,55 @@ saved scores; it does not change the verdict).** Full tables:
   fishing stratum the JEPA's rate is still 3.5% to 4.2%. The fused detector
   inherits it.
 
+- *Who the false alarms are (added 2026-11-10, from each vessel's AIS
+  ship-type code and position).* Four vessels raise 85% of jepa-s0's 273 false
+  alarms: a cargo ship (type 79) moored at the Norfolk terminals on the
+  Elizabeth River (76 of its 136 normal windows), a fishing vessel in the
+  mid-bay near Reedville (75 of 124), a pilot boat in Baltimore Harbor (41 of
+  146), and a dredge in Hampton Roads (41 of 145). So the "anchored cargo"
+  problem is a single moored ship. Pilot vessels and dredges together raise
+  24% to 32% of the JEPA's false alarms; Kalman, physics, and the raw-target
+  predictor raise none on the dredge. The fishing vessel trips every detector
+  (55% of Kalman's false alarms); its location and behavior are consistent
+  with purse-seine sets from the Reedville menhaden fleet, which this data
+  cannot confirm. The pilot boat working the Cape Henry boarding area raises
+  only 2 to 4 false alarms per detector.
+
+## Learned baselines (separate recorded scoring, 2026-11-11)
+
+Isolation Forest, LSTM autoencoder, and a TrAISformer-style forecaster were
+added after the main scoring at the owner's decision. Their settings were
+picked on the validation anomaly set by a rule fixed in advance (DECISIONS.md;
+`reports/baseline-grid/`), three seeds each were trained, and the frozen test
+set was scored once for them in a separately recorded benchmark
+(`configs/eval-baselines.yaml`, `reports/eval-v2-baselines/benchmark.json`).
+The contract criteria do not name these methods; the comparison is reported,
+not gated. Three-seed means computed from
+`reports/eval-v2-baselines/results.csv` and `reports/eval-v2/results.csv`:
+
+| | JEPA | Kalman | Raw target | TrAISformer-style | LSTM autoencoder | Isolation Forest |
+|---|--:|--:|--:|--:|--:|--:|
+| Behavioral AUROC | 0.807 | 0.737 | 0.797 | **0.816** | 0.750 | 0.475 |
+| Behavioral AUPRC | 0.760 | 0.721 | 0.777 | **0.804** | 0.722 | 0.463 |
+| Kinematic AUROC | 0.849 | 0.930 | **0.934** | 0.903 | 0.828 | 0.836 |
+| Loitering AUROC | **0.938** | 0.841 | 0.900 | 0.910 | 0.907 | 0.448 |
+| Route deviation AUROC | 0.677 | 0.634 | 0.694 | **0.722** | 0.592 | 0.502 |
+| False alarms, test normals | 5.0% | 2.1% | 2.5% | **1.6%** | 1.8% | 3.3% |
+| Loitering detected at budget | 23% | 3% | 22% | 49% | **55%** | 1% |
+
+The TrAISformer-style forecaster predicts the next step's binned motion,
+speed, and course and scores a window by its least likely step. On test it
+matches the JEPA on behavioral anomalies (+0.009 AUROC, +0.044 AUPRC; the two
+tied on validation, 0.706 and 0.705), leads every method on route deviation,
+is clearly better than the JEPA on kinematic anomalies, and is the only
+learned detector within the contract's 2% false-alarm limit. The JEPA keeps
+the best loitering ranking (0.938 vs 0.910), but at the alert budget the
+forecaster and the LSTM autoencoder catch about twice as much injected
+loitering. Measured against the same Kalman margin, the forecaster's
+behavioral gain (+0.079 AUROC) would also have missed 0.10. A vessel-level
+bootstrap of these pairwise differences is in
+`reports/eval-v2-baselines/posthoc/` (exploratory).
+
 **Not shown here.** Anomalies are synthetic, injected into real tracks; the
 data covers one region and one season and Class A vessels only.
 
