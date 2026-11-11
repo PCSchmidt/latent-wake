@@ -3,6 +3,12 @@
 Changes to what the project measures and how, newest first. Code-level
 detail is in the git history and pull requests; reasons are in DECISIONS.md.
 
+## 2026-11-11: write-up
+
+- `docs/WRITEUP.md` with four figures drawn from committed results
+  (`scripts/make_writeup_figures.py`).
+- Vessels anonymized in published reports; `posthoc` anonymizes by default.
+
 ## 2026-11-11: learned baselines and ship-type post-hoc check
 
 - Isolation Forest, LSTM autoencoder, and TrAISformer-style forecaster:

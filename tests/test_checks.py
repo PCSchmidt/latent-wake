@@ -313,7 +313,7 @@ def test_posthoc_reproduces_recorded_rates_and_bootstraps(processed, tmp_path):
     for m in scores:  # shares of each method's false alarms sum to one
         assert by_type[m].sum() == pytest.approx(1.0) or by_type[m].sum() == 0
     top = pd.read_csv(dest / "top_alarming_vessels.csv")
-    assert {"mmsi", "ais_type", "lat", "lon"} <= set(top.columns)
+    assert {"vessel", "ais_type", "lat", "lon"} <= set(top.columns) and "mmsi" not in top.columns
     assert top.lat.between(36.6, 39.7).all()
 
     normal = (ts.cells.kind == "normal").to_numpy()
