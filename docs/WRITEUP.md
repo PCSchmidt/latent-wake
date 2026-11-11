@@ -255,8 +255,9 @@ pre-registered scoring and are reported as exploratory.
 
 ## Reproduce
 
-Every step is a command in the [README](../README.md), from download to
-post-hoc analysis. Decisions and their reasons are in
+Every step is a command in [`docs/REPRODUCE.md`](REPRODUCE.md), from download
+to the demo panel. The panel is live at
+[pcschmidt.github.io/darkwater/latent-wake.html](https://pcschmidt.github.io/darkwater/latent-wake.html). Decisions and their reasons are in
 [`DECISIONS.md`](../DECISIONS.md); ablations in
 [`ABLATION_RESULTS.md`](../ABLATION_RESULTS.md); the model card in
 [`MODEL_CARD.md`](../MODEL_CARD.md). The figures are drawn from committed

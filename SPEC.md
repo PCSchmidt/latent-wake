@@ -47,8 +47,8 @@ means three seeds train without collapse and pass `training_stable`. Code:
 
 ## Baselines
 
-Physics residual, Kalman filter, raw-target predictor, plus the planned LSTM
-autoencoder, Isolation Forest, and TrAISformer-style forecaster. "Done" means
+Physics residual, Kalman filter, raw-target predictor, LSTM autoencoder,
+Isolation Forest, and TrAISformer-style forecaster. "Done" means
 every baseline scores the same frozen test set through `latentwake/evaluate.py`.
 
 **Status:** done. Physics, Kalman, and raw target in the main benchmark;
