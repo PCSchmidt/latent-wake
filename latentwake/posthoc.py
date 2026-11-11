@@ -146,8 +146,28 @@ def false_alarms_by_ais_type(scores, thresholds, normal, mmsi, types: dict[int, 
     return pd.DataFrame(rows).sort_values("n_normal", ascending=False)
 
 
-def top_alarming_vessels(scores, thresholds, normal, mmsi, types, lat, lon, methods, k: int = 10) -> pd.DataFrame:
-    """The k vessels with the most false alarms for each method, with type and typical position."""
+def anonymize(table: pd.DataFrame) -> pd.DataFrame:
+    """Replace MMSIs with labels like "fishing A": a flag means unusual to a model, not wrongdoing,
+    so published reports do not name real vessels. Letters follow total false alarms within each type."""
+    import string
+
+    tot = table.groupby(["mmsi", "name"]).false_alarms.sum().reset_index().sort_values(
+        ["false_alarms", "mmsi"], ascending=[False, True])
+    labels, count = {}, {}
+    for _, r in tot.iterrows():
+        i = count.get(r["name"], 0)
+        count[r["name"]] = i + 1
+        labels[r["mmsi"]] = f"{r['name']} {string.ascii_uppercase[i % 26]}{'' if i < 26 else i // 26}"
+    out = table.copy()
+    out.insert(1, "vessel", out.mmsi.map(labels))
+    return out.drop(columns="mmsi")
+
+
+def top_alarming_vessels(scores, thresholds, normal, mmsi, types, lat, lon, methods, k: int = 10,
+                         show_mmsi: bool = False) -> pd.DataFrame:
+    """The k vessels with the most false alarms for each method, with type and typical position.
+
+    Vessels are anonymized unless show_mmsi is set (for local investigation only)."""
     rows = []
     for m in methods:
         if m not in thresholds:
@@ -161,7 +181,8 @@ def top_alarming_vessels(scores, thresholds, normal, mmsi, types, lat, lon, meth
                          "normal_windows": int((normal & (mmsi == v)).sum()),
                          "ais_type": t, "name": ais_type_name(t) if t >= 0 else "unknown",
                          "lat": round(float(np.median(lat[sel])), 3), "lon": round(float(np.median(lon[sel])), 3)})
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    return table if show_mmsi or table.empty else anonymize(table)
 
 
 def cell_centers(cells: np.ndarray, region, cell_deg: float) -> tuple[np.ndarray, np.ndarray]:

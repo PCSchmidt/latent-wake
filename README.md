@@ -31,6 +31,8 @@ flowchart LR
 
 ## Results
 
+**Write-up: [`docs/WRITEUP.md`](docs/WRITEUP.md).**
+
 One scoring of the frozen test set (180 held-out vessels, June 2025, 11,600 windows), three seeds per learned model. Criteria and margins were fixed in [`DATA_CONTRACT.md`](DATA_CONTRACT.md) before scoring. Full tables: [`EVAL_RESULTS.md`](EVAL_RESULTS.md); model card: [`MODEL_CARD.md`](MODEL_CARD.md).
 
 | AUROC (three-seed mean) | JEPA | Kalman | Raw-target predictor | Fused JEPA + Kalman | TrAISformer-style | LSTM autoencoder | Isolation Forest |
