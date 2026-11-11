@@ -51,6 +51,12 @@ collapse-prevention tricks such as an EMA target network. My question was whethe
 to vessel tracks on a laptop GPU, finds anomalies a strong classical baseline
 misses.
 
+Behind that question was a broader one. I took on the project to learn how
+world models behave on real data, and anomaly detection was the test: injected
+anomalies with known ground truth show whether the model learned how ships
+move. The model-level findings (does the recipe transfer, does the model use
+its actions, what does the latent space buy) are in "What the ablations say".
+
 ## What I built
 
 **Data.** NOAA MarineCadastre AIS for April to June 2025, cropped to the bay
@@ -240,6 +246,13 @@ wherever a result landed within 0.02 of the main model.
 - **Masking known context.** Pilot stations, anchorages, terminals, and
   dredging operations are places where unusual motion is routine. An analyst
   display should show alerts against them.
+
+The world-model questions the project left open matter more to me than the
+detector fixes above. Latent Wake used its model only for one-step surprise.
+Next would be imagined multi-step rollouts compared with the observation-space
+forecaster, counterfactual actions (does the imagined track turn when the
+reported course does?), probes of what the latent encodes, and planning in the
+latent space as LeWorldModel does, starting on one of its own control tasks.
 
 ## Limitations
 
