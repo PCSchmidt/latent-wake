@@ -106,8 +106,8 @@ def run(config: Path, baselines: Path, out: Path, per_kind: int = 16, normals: i
     from latentwake.score import transition_errors
     from latentwake.train import load_model
 
-    cfg = yaml.safe_load(Path(config).read_text())
-    bcfg = yaml.safe_load(Path(baselines).read_text())
+    cfg = yaml.safe_load(Path(config).read_text(encoding="utf-8"))
+    bcfg = yaml.safe_load(Path(baselines).read_text(encoding="utf-8"))
     if cfg["testset"] != bcfg["testset"]:
         raise ValueError("the two configs score different test sets")
     processed, interim = Path(cfg["processed"]), Path(cfg["interim"])
@@ -132,7 +132,7 @@ def run(config: Path, baselines: Path, out: Path, per_kind: int = 16, normals: i
     from latentwake.data.regions import get_region
     from latentwake.posthoc import cell_centers
 
-    pcfg = PreprocessConfig(**json.loads((processed / "stats.json").read_text())["config"])
+    pcfg = PreprocessConfig(**json.loads((processed / "stats.json").read_text(encoding="utf-8"))["config"])
     region = get_region(pcfg.region)
     clat, clon = cell_centers(ts.loc[:, 0], region, pcfg.cell_deg)
     types = vessel_ais_types(interim, mmsi[normal])
@@ -243,7 +243,7 @@ def run(config: Path, baselines: Path, out: Path, per_kind: int = 16, normals: i
         board.append({"detector": g, "kind": "normal", "auroc": None, "auprc": None,
                       "detect": float(nm.fpr_at_budget.mean())})
 
-    bench = json.loads((Path(cfg["out"]) / "benchmark.json").read_text())
+    bench = json.loads((Path(cfg["out"]) / "benchmark.json").read_text(encoding="utf-8"))
     meta_rows = [
         {"key": "testset_sha256", "value": bench["testset_sha256"][:12]},
         {"key": "scored_at", "value": bench["scored_at"]},
@@ -264,7 +264,7 @@ def run(config: Path, baselines: Path, out: Path, per_kind: int = 16, normals: i
     sql.append("COMMIT;")
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(sql) + "\n")
+    out.write_text("\n".join(sql) + "\n", encoding="utf-8")
     print(f"wrote {out}: {len(win_rows)} windows, {len(pt_rows)} points, {len(dens_rows)} density cells, "
           f"{out.stat().st_size / 1e6:.2f} MB")
     return out

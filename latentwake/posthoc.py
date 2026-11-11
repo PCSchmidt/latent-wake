@@ -281,7 +281,7 @@ def pairwise_bootstrap(cells: pd.DataFrame, scores: dict[str, np.ndarray], mmsi:
 
 def compare(configs: list[Path], pairs: list[tuple[str, str]], n_boot: int = 200) -> Path:
     """Compare methods scored in separate recorded benchmarks of the same test set (no re-scoring)."""
-    cfgs = [yaml.safe_load(Path(c).read_text()) for c in configs]
+    cfgs = [yaml.safe_load(Path(c).read_text(encoding="utf-8")) for c in configs]
     testsets = {c["testset"] for c in cfgs}
     if len(testsets) != 1:
         raise ValueError(f"configs score different test sets: {sorted(testsets)}")
@@ -301,13 +301,13 @@ def compare(configs: list[Path], pairs: list[tuple[str, str]], n_boot: int = 200
           "Post hoc, from saved scores of separately recorded benchmarks of the same frozen test set; seed-averaged; "
           f"95% intervals from a cluster bootstrap over {len(np.unique(mmsi))} source vessels ({n_boot} draws). "
           "Not pre-registered.", "", table.round(3).to_markdown(index=False), ""]
-    (dest / "COMPARISONS.md").write_text("\n".join(md))
+    (dest / "COMPARISONS.md").write_text("\n".join(md), encoding="utf-8")
     print("\n".join(md))
     return dest
 
 
 def run(cfg_path: Path = Path("configs/eval.yaml"), n_boot: int = 200, out_name: str = "posthoc") -> Path:
-    cfg = yaml.safe_load(Path(cfg_path).read_text())
+    cfg = yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8"))
     out_dir = Path(cfg["out"])
     dest = out_dir / out_name
     dest.mkdir(parents=True, exist_ok=True)
@@ -334,7 +334,7 @@ def run(cfg_path: Path = Path("configs/eval.yaml"), n_boot: int = 200, out_name:
         from latentwake.data.preprocess import PreprocessConfig
         from latentwake.data.regions import get_region
 
-        pcfg = PreprocessConfig(**json.loads((Path(cfg["processed"]) / "stats.json").read_text())["config"])
+        pcfg = PreprocessConfig(**json.loads((Path(cfg["processed"]) / "stats.json").read_text(encoding="utf-8"))["config"])
         lat, lon = cell_centers(ts.loc[:, 0], get_region(pcfg.region), pcfg.cell_deg)
         types = vessel_ais_types(Path(interim), mmsi[normal])
         by_type = false_alarms_by_ais_type(scores, thresholds, normal, mmsi, types)
@@ -380,7 +380,7 @@ def run(cfg_path: Path = Path("configs/eval.yaml"), n_boot: int = 200, out_name:
             top.to_markdown(index=False),
             "",
         ]
-    (dest / "POSTHOC.md").write_text("\n".join(md))
+    (dest / "POSTHOC.md").write_text("\n".join(md), encoding="utf-8")
     (dest / "thresholds.json").write_text(json.dumps(thresholds, indent=2) + "\n")
     print("\n".join(md))
     return dest
