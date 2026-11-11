@@ -204,6 +204,16 @@ python -m latentwake.data.preprocess --interim data/interim/synthetic --out data
 
 `latentwake.data.synthetic` writes days in exactly the download step's format: simple ship kinematics (transits, tugs, ferries, fishing boats, anchored ships) with realistic reporting flaws. It has no coastline and is not a model of the real bay. It exists for tests and for building the model before real data arrives.
 
+
+### Step 7: export the Darkwater panel
+
+```bash
+python -m latentwake.export_panel --out ../darkwater/sql/latentwake/data.sql
+cd ../darkwater && python3 build.py
+```
+
+Writes an anonymized sample of the scored test set (tracks, recorded scores and thresholds, per-step surprise for display, a traffic-density grid, and the recorded scoreboard) as SQL for Darkwater's [Latent Wake page](https://pcschmidt.github.io/darkwater/latent-wake.html). No MMSIs, names, or timestamps are exported.
+
 ## Governance: Meridian gates
 
 This project runs under [Meridian](https://github.com/PCSchmidt/meridian) (`ml-research` recipe), adapted to the 12-week plan. Each phase ends at a gate that a script, not an agent's say-so, decides:

@@ -3,6 +3,11 @@
 Changes to what the project measures and how, newest first. Code-level
 detail is in the git history and pull requests; reasons are in DECISIONS.md.
 
+## 2026-11-11: Darkwater panel export
+
+- `latentwake.export_panel` writes an anonymized sample of the scored test
+  set as SQL for Darkwater's Latent Wake page.
+
 ## 2026-11-11: write-up
 
 - `docs/WRITEUP.md` with four figures drawn from committed results
