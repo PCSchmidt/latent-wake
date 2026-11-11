@@ -132,9 +132,27 @@ learned detector within the contract's 2% false-alarm limit. The JEPA keeps
 the best loitering ranking (0.938 vs 0.910), but at the alert budget the
 forecaster and the LSTM autoencoder catch about twice as much injected
 loitering. Measured against the same Kalman margin, the forecaster's
-behavioral gain (+0.079 AUROC) would also have missed 0.10. A vessel-level
-bootstrap of these pairwise differences is in
-`reports/eval-v2-baselines/posthoc/` (exploratory).
+behavioral gain (+0.079 AUROC) would also have missed 0.10. 
+
+Vessel-level bootstrap intervals (95%, exploratory;
+`reports/eval-v2-baselines/posthoc/COMPARISONS.md`) separate what is solid
+from what is not:
+
+| Difference (AUROC unless noted) | Estimate | 95% interval | Reading |
+|---|--:|--:|---|
+| Forecaster − JEPA, behavioral | +0.009 | −0.027 to +0.042 | tie |
+| Forecaster − JEPA, behavioral AUPRC | +0.044 | −0.004 to +0.094 | forecaster likely ahead, not conclusive |
+| Forecaster − JEPA, loitering | −0.027 | −0.058 to +0.002 | JEPA likely ahead, not conclusive |
+| Forecaster − JEPA, route deviation AUPRC | +0.088 | +0.027 to +0.145 | forecaster ahead |
+| Forecaster − JEPA, kinematic | +0.054 | +0.034 to +0.079 | forecaster ahead |
+| Forecaster − Kalman, behavioral | +0.079 | +0.054 to +0.102 | forecaster ahead; 0.10 margin at the edge |
+| JEPA − Kalman, behavioral | +0.070 | +0.032 to +0.115 | JEPA ahead; 0.10 margin inside |
+| LSTM autoencoder − JEPA, behavioral | −0.057 | −0.090 to −0.027 | JEPA ahead |
+
+Both learned forecasters of motion beat Kalman on behavioral anomalies by a
+clear, similar amount; neither clears the pre-registered 0.10 with any
+confidence. Between the two, the data cannot separate them on behavioral
+anomalies overall.
 
 **Not shown here.** Anomalies are synthetic, injected into real tracks; the
 data covers one region and one season and Class A vessels only.

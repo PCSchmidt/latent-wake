@@ -61,8 +61,9 @@ over Kalman on behavioral anomalies overall (+0.070 AUROC against 0.10),
 fusion does not beat Kalman by the required margin, and no detector held the
 1% alert budget on test vessels. A TrAISformer-style forecaster, added later
 as a baseline (settings chosen on validation, one recorded test scoring),
-matches the JEPA on behavioral anomalies, beats it on kinematic ones, and
-comes closest to the alert budget.
+ties the JEPA on behavioral anomalies (difference +0.009 AUROC, vessel-level
+95% interval −0.027 to +0.042), beats it on kinematic ones (+0.054, interval
++0.034 to +0.079), and comes closest to the alert budget.
 
 ## Intended use
 
