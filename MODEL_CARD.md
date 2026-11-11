@@ -47,19 +47,22 @@ in DATA_CONTRACT.md before the test set was scored. The test set was frozen
 **Test results (three-seed means; full tables in [EVAL_RESULTS.md](EVAL_RESULTS.md)):
 3 of 8 contract criteria met.**
 
-| | JEPA | Kalman | Raw target | Fused |
-|---|--:|--:|--:|--:|
-| Loitering AUROC | **0.938** | 0.841 | 0.900 | 0.904 |
-| Route deviation AUROC | 0.677 | 0.634 | **0.694** | 0.664 |
-| Position spoof AUROC | 0.872 | **0.985** | 0.979 | 0.976 |
-| Teleport AUROC | 0.843 | **0.989** | 0.987 | 0.981 |
-| AIS gap AUROC | 0.832 | 0.815 | **0.835** | 0.835 |
-| False alarms on test normals at the 1% validation budget | 5.0% | 2.1% | 2.5% | 4.1% |
+| AUROC (three-seed mean) | JEPA | Kalman | Raw-target predictor | Fused JEPA + Kalman | TrAISformer-style | LSTM autoencoder | Isolation Forest |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| Loitering | **0.938** | 0.841 | 0.900 | 0.904 | 0.910 | 0.907 | 0.448 |
+| Route deviation | 0.677 | 0.634 | 0.694 | 0.664 | **0.722** | 0.592 | 0.502 |
+| Position spoof | 0.872 | **0.985** | 0.979 | 0.976 | 0.958 | 0.900 | 0.905 |
+| Teleport | 0.843 | **0.989** | 0.987 | 0.981 | 0.957 | 0.901 | 0.928 |
+| AIS gap | 0.832 | 0.815 | **0.835** | **0.835** | 0.794 | 0.682 | 0.675 |
+| False alarms on test normals at a 1% validation budget | 5.0% | 2.1% | 2.5% | 4.1% | **1.6%** | 1.8% | 3.3% |
 
-The JEPA is the best detector of loitering; it does not clear the
-pre-registered margin over Kalman on behavioral anomalies overall (+0.070
-AUROC against 0.10), fusion does not beat Kalman by the required margin, and
-no detector held the 1% alert budget on test vessels.
+The JEPA ranks loitering best; it does not clear the pre-registered margin
+over Kalman on behavioral anomalies overall (+0.070 AUROC against 0.10),
+fusion does not beat Kalman by the required margin, and no detector held the
+1% alert budget on test vessels. A TrAISformer-style forecaster, added later
+as a baseline (settings chosen on validation, one recorded test scoring),
+matches the JEPA on behavioral anomalies, beats it on kinematic ones, and
+comes closest to the alert budget.
 
 ## Intended use
 
@@ -93,6 +96,10 @@ model," not "wrongdoing."
   unexplained so far.
 - **Small strata.** Tanker strata have fewer than 200 validation windows and
   fall back to coarser calibration groups.
+- **A simpler forecaster does as well.** A TrAISformer-style next-step
+  forecaster in observation space matches this model on behavioral anomalies
+  and beats it elsewhere, so the latent objective's advantage is limited to
+  ranking loitering.
 - **Location is not used.** A learned location embedding helped route
   deviation but generalized poorly, so the main model sees relative motion
   only.

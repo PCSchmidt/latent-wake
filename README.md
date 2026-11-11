@@ -33,19 +33,22 @@ flowchart LR
 
 One scoring of the frozen test set (180 held-out vessels, June 2025, 11,600 windows), three seeds per learned model. Criteria and margins were fixed in [`DATA_CONTRACT.md`](DATA_CONTRACT.md) before scoring. Full tables: [`EVAL_RESULTS.md`](EVAL_RESULTS.md); model card: [`MODEL_CARD.md`](MODEL_CARD.md).
 
-| AUROC (three-seed mean) | JEPA | Kalman | Raw-target predictor | Fused JEPA + Kalman |
-|---|--:|--:|--:|--:|
-| Loitering | **0.938** | 0.841 | 0.900 | 0.904 |
-| Route deviation | 0.677 | 0.634 | **0.694** | 0.664 |
-| Position spoof | 0.872 | **0.985** | 0.979 | 0.976 |
-| Teleport | 0.843 | **0.989** | 0.987 | 0.981 |
-| AIS gap | 0.832 | 0.815 | **0.835** | 0.835 |
-| False alarms on test normals at a 1% validation budget | 5.0% | 2.1% | 2.5% | 4.1% |
+| AUROC (three-seed mean) | JEPA | Kalman | Raw-target predictor | Fused JEPA + Kalman | TrAISformer-style | LSTM autoencoder | Isolation Forest |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| Loitering | **0.938** | 0.841 | 0.900 | 0.904 | 0.910 | 0.907 | 0.448 |
+| Route deviation | 0.677 | 0.634 | 0.694 | 0.664 | **0.722** | 0.592 | 0.502 |
+| Position spoof | 0.872 | **0.985** | 0.979 | 0.976 | 0.958 | 0.900 | 0.905 |
+| Teleport | 0.843 | **0.989** | 0.987 | 0.981 | 0.957 | 0.901 | 0.928 |
+| AIS gap | 0.832 | 0.815 | **0.835** | **0.835** | 0.794 | 0.682 | 0.675 |
+| False alarms on test normals at a 1% validation budget | 5.0% | 2.1% | 2.5% | 4.1% | **1.6%** | 1.8% | 3.3% |
 
-- **The JEPA is the best loitering detector**, on validation and test, with every seed. That is also the one place where predicting in latent space clearly beats predicting raw features.
+The last three columns are baselines added after the main scoring, with settings chosen on validation and one separately recorded test scoring.
+
+- **The JEPA ranks loitering best** (0.938 AUROC), on validation and test, with every seed. That is also the one place where predicting in latent space clearly beats predicting raw features.
+- **A TrAISformer-style forecaster is the strongest learned detector overall.** Predicting the next step's binned motion, it matches the JEPA on behavioral anomalies (0.816 vs 0.807 mean AUROC; tied on validation), leads on route deviation, is far better on spoofs and teleports, holds the alert budget best (1.6% false alarms), and catches about half of injected loitering at that budget against the JEPA's quarter.
 - **It does not clear the pre-registered margin over Kalman on behavioral anomalies**: +0.070 AUROC against 0.10 (vessel-level bootstrap 95% interval 0.032 to 0.115).
 - **Fusing it with Kalman does not pay**: +0.019 AUROC and −0.061 AUPRC against Kalman alone.
-- **No detector held the 1% alert budget on new vessels.** Post hoc, most false alarms come from a handful of test vessels: fishing boats under way trip every detector, and the JEPA also over-alarms on anchored cargo ships.
+- **No detector held the 1% alert budget on new vessels.** Post hoc, four vessels raise 85% of the JEPA's false alarms: a cargo ship moored at the Norfolk terminals, a fishing vessel working the mid-bay near Reedville that trips every detector, a Baltimore Harbor pilot boat, and a Hampton Roads dredge. Dredge false alarms are unique to the JEPA.
 - On small spoofs and teleports the JEPA is near chance, where a Kalman filter is above 0.94.
 
 ## Data
@@ -60,7 +63,7 @@ Synthetic anomalies (position spoof, teleport, AIS gap, route deviation, loiteri
 
 ## Evaluation
 
-- **Baselines built:** physics residual, Kalman-filter innovation (observes position and reported velocity), and the same predictor on raw features (the key JEPA ablation). **Planned:** Isolation Forest, LSTM autoencoder, TrAISformer-style forecaster.
+- **Baselines:** physics residual, Kalman-filter innovation (observes position and reported velocity), the same predictor on raw features (the key JEPA ablation), Isolation Forest, LSTM autoencoder, and a TrAISformer-style forecaster.
 - **Metrics:** AUROC and AUPRC per anomaly type and severity level; false-alarm and detection rates at a 1% validation alert budget. **Planned:** severity curves as figures, false alarms per 1,000 vessel-hours, time to detect.
 - **Ablations ([`ABLATION_RESULTS.md`](ABLATION_RESULTS.md), validation):** SIGReg weight (0, 0.02, 0.09, 0.3), action conditioning on/off, raw vs. latent target, anchored-window share, latent size, context length. SIGReg prevents collapse; action conditioning carries the prediction; latent prediction helps loitering and costs kinematic detection; a 64-dim latent matches the main model on behavioral kinds and beats it on kinematic ones. VICReg and EMA/stop-gradient deferred. Attention pooling, 4-step chunks, and location context were already compared on validation ([`reports/validation-v2.md`](reports/validation-v2.md)).
 - **Rigor:** 3 seeds per configuration; test set frozen before the first model run and scored once; pre-registered criteria; vessel-level bootstrap intervals.

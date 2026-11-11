@@ -19,6 +19,8 @@ contract verdict.
 Usage:
     python -m latentwake.posthoc                       # paths from configs/eval.yaml
     python -m latentwake.posthoc --bootstrap 500
+    python -m latentwake.posthoc --config configs/eval.yaml --config configs/eval-baselines.yaml \\
+        --compare trais:jepa --compare trais:kalman      # methods from separate recorded benchmarks
 """
 
 from __future__ import annotations
@@ -213,6 +215,76 @@ def cluster_bootstrap(cells: pd.DataFrame, scores: dict[str, np.ndarray], mmsi: 
     ])
 
 
+GROUPS = {
+    "behavioral": ["loitering", "route_deviation"],
+    "loitering": ["loitering"],
+    "route_deviation": ["route_deviation"],
+    "kinematic": ["ais_gap", "position_spoof", "teleport"],
+}
+
+
+def pairwise_bootstrap(cells: pd.DataFrame, scores: dict[str, np.ndarray], mmsi: np.ndarray,
+                       pairs: list[tuple[str, str]], n_boot: int = 200, seed: int = 0) -> pd.DataFrame:
+    """Difference between two methods (seed-averaged) per kind group, with vessel-cluster bootstrap intervals."""
+    needed = {GROUP.sub("", m) for p in pairs for m in p}
+    methods = {m: s for m, s in scores.items() if GROUP.sub("", m) in needed}
+
+    def diffs(res: pd.DataFrame) -> dict:
+        out = {}
+        for a, b in pairs:
+            for g, kinds in GROUPS.items():
+                for metric in ("auroc", "auprc"):
+                    out[(a, b, g, metric)] = _method_mean(res, a, metric, kinds) - _method_mean(res, b, metric, kinds)
+        return out
+
+    point = diffs(cell_metrics(cells, methods))
+    vessels = np.unique(mmsi)
+    by_vessel = {v: np.flatnonzero(mmsi == v) for v in vessels}
+    rng = np.random.default_rng(seed)
+    draws = []
+    for _ in range(n_boot):
+        idx = np.concatenate([by_vessel[v] for v in rng.choice(vessels, len(vessels), replace=True)])
+        try:
+            draws.append(diffs(cell_metrics(cells.iloc[idx].reset_index(drop=True),
+                                            {m: s[idx] for m, s in methods.items()})))
+        except Exception:
+            continue
+    d = pd.DataFrame(draws)
+    return pd.DataFrame([
+        {"a": k[0], "b": k[1], "kinds": k[2], "metric": k[3], "a_minus_b": point[k],
+         "ci_low": float(d[k].quantile(0.025)), "ci_high": float(d[k].quantile(0.975)),
+         "share_a_better": float((d[k] > 0).mean())}
+        for k in point
+    ])
+
+
+def compare(configs: list[Path], pairs: list[tuple[str, str]], n_boot: int = 200) -> Path:
+    """Compare methods scored in separate recorded benchmarks of the same test set (no re-scoring)."""
+    cfgs = [yaml.safe_load(Path(c).read_text()) for c in configs]
+    testsets = {c["testset"] for c in cfgs}
+    if len(testsets) != 1:
+        raise ValueError(f"configs score different test sets: {sorted(testsets)}")
+    ts = load_test_set(Path(cfgs[0]["testset"]))
+    scores = {}
+    for c in cfgs:
+        with np.load(Path(c["out"]) / "scores.npz") as z:
+            for k in z.files:
+                scores.setdefault(k, z[k])
+    windows = pd.read_parquet(Path(cfgs[0]["processed"]) / "windows.parquet", columns=["window_id", "mmsi"])
+    mmsi = windows.set_index("window_id").loc[ts.cells.source_window.to_numpy()].mmsi.to_numpy()
+    table = pairwise_bootstrap(ts.cells, scores, mmsi, pairs, n_boot=n_boot)
+    dest = Path(cfgs[-1]["out"]) / "posthoc"
+    dest.mkdir(parents=True, exist_ok=True)
+    table.to_csv(dest / "comparisons.csv", index=False)
+    md = ["# Pairwise comparisons on the test set (exploratory)", "",
+          "Post hoc, from saved scores of separately recorded benchmarks of the same frozen test set; seed-averaged; "
+          f"95% intervals from a cluster bootstrap over {len(np.unique(mmsi))} source vessels ({n_boot} draws). "
+          "Not pre-registered.", "", table.round(3).to_markdown(index=False), ""]
+    (dest / "COMPARISONS.md").write_text("\n".join(md))
+    print("\n".join(md))
+    return dest
+
+
 def run(cfg_path: Path = Path("configs/eval.yaml"), n_boot: int = 200, out_name: str = "posthoc") -> Path:
     cfg = yaml.safe_load(Path(cfg_path).read_text())
     out_dir = Path(cfg["out"])
@@ -295,10 +367,17 @@ def run(cfg_path: Path = Path("configs/eval.yaml"), n_boot: int = 200, out_name:
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description="Exploratory analysis of a scored test set (never re-scores).")
-    p.add_argument("--config", type=Path, default=Path("configs/eval.yaml"))
+    p.add_argument("--config", type=Path, action="append", default=None,
+                   help="eval config; repeat with --compare to combine separately recorded benchmarks")
     p.add_argument("--bootstrap", type=int, default=200)
+    p.add_argument("--compare", action="append", default=[], metavar="A:B",
+                   help="method pair to compare, e.g. trais:jepa (seed groups are averaged)")
     a = p.parse_args(argv)
-    run(a.config, a.bootstrap)
+    configs = a.config or [Path("configs/eval.yaml")]
+    if a.compare:
+        compare(configs, [tuple(x.split(":", 1)) for x in a.compare], a.bootstrap)
+    else:
+        run(configs[0], a.bootstrap)
 
 
 if __name__ == "__main__":

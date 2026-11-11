@@ -51,8 +51,9 @@ Physics residual, Kalman filter, raw-target predictor, plus the planned LSTM
 autoencoder, Isolation Forest, and TrAISformer-style forecaster. "Done" means
 every baseline scores the same frozen test set through `latentwake/evaluate.py`.
 
-**Status:** physics, Kalman, and raw target done and scored; LSTM
-autoencoder, Isolation Forest, and TrAISformer-style forecaster not started.
+**Status:** done. Physics, Kalman, and raw target in the main benchmark;
+Isolation Forest, LSTM autoencoder, and TrAISformer-style forecaster chosen on
+validation and scored once in a separate recorded benchmark.
 
 ---
 
