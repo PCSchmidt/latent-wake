@@ -1,0 +1,19 @@
+{
+  "testset": "data/testsets/chesapeake-test-v2",
+  "testset_sha256": "826137bdb5260a1d049ac1b8859b36d16043c3ac5b132570a7f4ff39dede8aa7",
+  "checkpoints": {
+    "iforest-s0": "3a9d58ba730f88515aa78ea0a832c3f8ef72711be3eb070dc575435b2d23e109",
+    "iforest-s1": "154f49711d8d2eaff669f682903e39bd2a4fc5fa42c701f2ea52e2e536eb3fb0",
+    "iforest-s2": "80448d985613e84686fb5eab35550e472260cc657649a1d41cf9d2b307684b86",
+    "lstmae-s0": "64e159e0be7b11c12e727c0be2b75a2e200395cc93bdba65596c9623c28af911",
+    "lstmae-s1": "3a00b9bc7b82b64578932b5bda6fcde66df6191a6986e90799cf71b2b9430e15",
+    "lstmae-s2": "5f84da7786de29fa222b4552ce5124f514de351e5d32e8df39c422064c64b5b2",
+    "trais-s0": "d4ae527ff485c308f5040dd9b171a4e876d04fc5f0db3ca9ab3c8d27aef9f475",
+    "trais-s1": "f9698e700a48e449d271e66078e4e209f2ce8ae1d4bb9ee8c520c2753e639de9",
+    "trais-s2": "7b3972321cbf60010ba2650a4b6c5f8e274af27df2f4e556a4ffac98ee172c11"
+  },
+  "fuse_with_kalman": null,
+  "alert_fpr": 0.01,
+  "calibration": "tail",
+  "scored_at": "2026-11-11T01:06:37+00:00"
+}
