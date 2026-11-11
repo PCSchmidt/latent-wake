@@ -76,8 +76,8 @@
     "name": "Darkwater Demo",
     "source_section": "Darkwater Demo",
     "lifecycle": {
-      "happy_path": false,
-      "integration": false,
+      "happy_path": true,
+      "integration": true,
       "edge_cases": false,
       "error_handling": false,
       "hardening": false

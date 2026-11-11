@@ -1,248 +1,276 @@
 # Latent Wake
 
-**JEPA surprise detection for maritime vessel tracks.**
+**Can a self-supervised world model spot unusual ship behavior better than a classical tracking filter?**
 
-Latent Wake trains a small Joint-Embedding Predictive Architecture (JEPA) world model on normal vessel motion from public AIS data. It then flags tracks where the model is *surprised*: the vessel ends up somewhere its own reported speed and course say it shouldn't be. The test set covers spoofed positions, teleports, AIS gaps, route deviation, and loitering; ship-to-ship rendezvous is a stretch goal.
+Latent Wake is a research project that trains a small *world model* on three months of real ship-tracking (AIS) data from Chesapeake Bay and Hampton Roads, then uses the model's **surprise** (how badly it predicts what a ship does next) to flag anomalies. It was benchmarked honestly against seven other detectors under success criteria written down before any real data was touched.
 
-The model follows the [LeWorldModel](https://arxiv.org/abs/2603.19312) recipe (a next-latent prediction loss plus the SIGReg Gaussian regularizer, with no EMA, stop-gradient, or pretrained encoder), ported from pixels to trajectories. It is sized to train on a single laptop GPU (RTX A4500, 16 GB).
+**[Write-up](docs/WRITEUP.md)** · **[Live demo panel](https://pcschmidt.github.io/darkwater/latent-wake.html)** · **[Full results](EVAL_RESULTS.md)** · **[Model card](MODEL_CARD.md)** · **[Reproduce it](docs/REPRODUCE.md)**
 
-> **Status (2026-11-09):** Phase 2 of 4, ahead of the 12-week plan. The pipeline ran on three months of real NOAA data, three seeds trained without collapse, and the frozen test set was scored once: **3 of 8 pre-registered criteria met** (see [Results](#results)). Next: ablations, the remaining baselines, then the Darkwater panel and write-up. The original plan is in [`docs/SCOPE.md`](docs/SCOPE.md).
+> **Status: shipped (2026-11-11).** All six project gates passed. The frozen test set was scored once: **3 of 8 pre-registered success criteria met.** Scoped on November 5 as a 12-week plan, built and shipped in a week.
 
-## Why
+---
 
-In the June 2026 [equation-grounded maritime anomaly benchmark](https://arxiv.org/abs/2606.29721), every tested detector scored near chance (AUROC about 54) on *unexpected AIS activity*: position jumps with no matching change in reported speed or course. That is the classic spoofing signature. A world model that has learned how position should follow from reported kinematics is a natural fit for catching it. As far as I can find, no one has tried a JEPA on it yet.
+## At a glance
 
-## How it works
+- **What:** a JEPA (joint-embedding predictive architecture) world model, following [LeWorldModel](https://arxiv.org/abs/2603.19312), adapted from video frames to vessel tracks and trained on one laptop GPU.
+- **Data:** 43.9 million real AIS reports (NOAA, April–June 2025), narrowed to 21.9 million from about 2,400 commercial (Class A) vessels.
+- **Test:** 11,600 two-hour windows from 180 vessels the models never saw, with five kinds of anomaly injected at graded severities so the right answers are known.
+- **Compared against:** a Kalman filter, a physics check, a raw-feature predictor, an LSTM autoencoder, an Isolation Forest, a TrAISformer-style forecaster, and a fused JEPA + Kalman detector.
+- **Main finding:** models that predict a ship's next move beat the Kalman filter on *behavioral* anomalies (loitering, leaving a route) by about 0.07–0.08 AUROC. Whether that prediction happens in a learned latent space (the JEPA) or directly on the observations (the forecaster) made no measurable difference there. Neither cleared the pre-registered 0.10 margin.
+- **Where the JEPA stands out:** best detector of loitering (0.94 AUROC). **Where it doesn't:** small position spoofs, where a Kalman filter that reads the ship's reported velocity is nearly perfect.
+- **Engineering:** a gated, test-driven pipeline (92 tests) in which a script, not anyone's say-so, decides when a phase is done. The test set was checksummed, frozen before training, and could only be scored once.
+
+---
+
+## Contents
+
+1. [The problem](#1-the-problem)
+2. [Objectives and scope](#2-objectives-and-scope)
+3. [How it works](#3-how-it-works)
+4. [Data and pipeline](#4-data-and-pipeline)
+5. [How it was tested](#5-how-it-was-tested)
+6. [Results](#6-results)
+7. [What I learned](#7-what-i-learned)
+8. [Limitations and responsible use](#8-limitations-and-responsible-use)
+9. [What's next](#9-whats-next)
+10. [How the project was run](#10-how-the-project-was-run)
+11. [Repository guide](#11-repository-guide)
+12. [References and acknowledgments](#12-references-and-acknowledgments)
+
+---
+
+## 1. The problem
+
+Most large ships broadcast an **Automatic Identification System (AIS)** message every few seconds: who they are, where they are, and their speed, course, and heading. Coast guards, ports, insurers, and sanctions analysts rely on it. It is also easy to abuse. A transponder can be switched off ("going dark"), fed a false position ("spoofing"), or used honestly by a ship doing something unusual: loitering where it has no business, or leaving its route to meet another vessel.
+
+Finding these by hand does not scale, and machine learning has a labeling problem: there are very few confirmed incidents to learn from. A recent benchmark ([*Redefining Maritime Anomaly Detection via Equation-Grounded Synthetic Anomalies*](https://arxiv.org/abs/2606.29721), June 2026) found detectors near chance on position jumps that contradict a ship's reported motion, the classic spoofing signature.
+
+A **world model** offers another route. Train it only on normal traffic to predict what a ship does next, given what the ship says it is doing. When the prediction goes badly wrong, something unusual happened. No labels are needed.
+
+## 2. Objectives and scope
+
+**Original objective** (from the [scope document](docs/SCOPE.md), November 5): test whether a JEPA world model, the approach behind recent self-supervised video and robotics models, can detect AIS anomalies better than classical methods, on a laptop, in 12 weeks, with results honest enough to stand up to scrutiny.
+
+**Pre-registered claims** (fixed in [`DATA_CONTRACT.md`](DATA_CONTRACT.md) before any real data was used):
+
+1. The JEPA beats a Kalman filter on behavioral anomalies by at least **0.10 AUROC** and **0.05 AUPRC**.
+2. A fused JEPA + Kalman detector beats either one alone.
+3. The fused detector holds a **1% false-alarm budget** set on validation data.
+
+The headline was set on behavioral anomalies rather than spoofing because an early synthetic test showed a Kalman filter that reads reported velocity is very hard to beat on spoofing. That turned out to be right.
+
+**Delivered against scope:**
+
+| Scoped | Delivered |
+|---|---|
+| Data pipeline for three months of NOAA AIS | Done: 43.9M reports, cleaned, resampled, windowed, split by time and vessel |
+| Frozen, checksummed anomaly test sets | Done: five anomaly kinds, graded severities, write-once with SHA-256 |
+| JEPA trained without collapse, three seeds | Done: 10.1M parameters, about 40 minutes per seed |
+| Baselines | Done: physics, Kalman, raw-target, Isolation Forest, LSTM autoencoder, TrAISformer-style, fused |
+| Ablations | Done: nine, on validation, three seeds where results were close |
+| Demo panel in [Darkwater](https://github.com/PCSchmidt/darkwater) | Done: [live](https://pcschmidt.github.io/darkwater/latent-wake.html) |
+| Write-up | Done: [`docs/WRITEUP.md`](docs/WRITEUP.md) |
+| OMTAD / equation-grounded benchmark | Not done |
+| VICReg and EMA ablations | Deferred |
+| Ship-to-ship rendezvous detection | Out of scope (needs pairs of vessels) |
+
+## 3. How it works
+
+### The idea in plain language
+
+Imagine watching a ship for 16 minutes, then being told what its captain *says* it will do next ("12 knots, heading 040°"). An experienced pilot could picture where the ship will be. If it ends up somewhere else, or behaves in a way ships in that bay never do, that is worth a look. Latent Wake trains a neural network to be that pilot.
+
+A **JEPA** does the predicting in a compressed internal representation (a *latent space*) rather than in raw coordinates. The bet is that a learned summary of motion captures *behavior* (transiting, maneuvering, circling) better than raw positions do. The risk is that the network learns a useless summary, for instance mapping every track to the same point (*collapse*). LeWorldModel's answer, used here, is **SIGReg**: a regularizer that keeps the latent codes spread out like a Gaussian cloud, with no other tricks needed.
+
+### End to end
 
 ```mermaid
 flowchart LR
-    A["Chunk t<br/>(8 steps, 16 min)"] --> E1["Encoder + projector"] --> Z1["Latent z(t)"] --> P["Predictor<br/>6-layer, AdaLN-zero"]
-    ACT["Action:<br/>reported SOG, COG,<br/>heading for next chunk"] --> P
-    B["Chunk t+1"] --> E2["Encoder + projector<br/>(same weights)"] --> Z2["Latent z(t+1)"]
-    P -->|"predicted z(t+1)"| ERR["Prediction error<br/>= loss, then surprise score"]
-    Z2 --> ERR
-    Z2 --> S["SIGReg<br/>(training only)"]
+    A["NOAA AIS<br/>daily files"] --> B["Crop to bay<br/>clean, Class A only"]
+    B --> C["Resample to 2-min grid<br/>64-step windows"]
+    C --> D["Split by time<br/>and vessel"]
+    D --> E["Train JEPA<br/>and baselines"]
+    D --> F["Freeze test set<br/>inject anomalies"]
+    E --> G["Score once<br/>calibrate on validation"]
+    F --> G
+    G --> H["Results, post-hoc<br/>analysis, write-up"]
+    G --> I["Darkwater panel"]
 ```
 
-- **Observation:** a 16-minute chunk of relative motion (east/north displacement, SOG, sin/cos COG, heading delta).
-- **Action:** what the vessel's AIS *claims* it will do next (reported SOG, COG, heading).
-- **Loss:** `MSE(predicted z(t+1), z(t+1)) + λ · SIGReg(Z)`, with one hyperparameter.
-- **Surprise score:** the same prediction error at inference, calibrated as a validation tail probability per vessel type × under way or stopped.
+### The model
 
-## Results
+```mermaid
+flowchart LR
+    A["Chunk t<br/>(8 steps, 16 min)"] --> E1["Encoder"] --> Z1["Latent z(t)"] --> P["Predictor<br/>6-layer transformer"]
+    ACT["What the ship reports<br/>for the next chunk:<br/>speed, course, heading"] --> P
+    B["Chunk t+1"] --> E2["Encoder<br/>(same weights)"] --> Z2["Latent z(t+1)"]
+    P -->|"predicted z(t+1)"| ERR["Prediction error<br/>= training loss<br/>= surprise score"]
+    Z2 --> ERR
+    Z2 --> S["SIGReg keeps latents<br/>spread out (training only)"]
+```
 
-**Write-up: [`docs/WRITEUP.md`](docs/WRITEUP.md).**
+- **Input:** each two-hour window is cut into eight 16-minute chunks. Each step carries relative motion only (east and north displacement, reported speed, course, heading change), so the model learns motion, not the map.
+- **The deliberate gap:** the predictor is told the ship's *reported* speed and course, never where it actually moved. If the positions disagree with the reports, the prediction fails.
+- **Training:** prediction error plus 0.09 × SIGReg. No EMA target network, no stop-gradient, no pretrained encoder.
+- **Scoring:** at test time, the same prediction error is converted to "how rare is this, among validation windows of the same vessel type and motion state", reported as a tail probability. An alert fires above a threshold that gives 1% false alarms on validation.
 
-One scoring of the frozen test set (180 held-out vessels, June 2025, 11,600 windows), three seeds per learned model. Criteria and margins were fixed in [`DATA_CONTRACT.md`](DATA_CONTRACT.md) before scoring. Full tables: [`EVAL_RESULTS.md`](EVAL_RESULTS.md); model card: [`MODEL_CARD.md`](MODEL_CARD.md).
+## 4. Data and pipeline
 
-| AUROC (three-seed mean) | JEPA | Kalman | Raw-target predictor | Fused JEPA + Kalman | TrAISformer-style | LSTM autoencoder | Isolation Forest |
+| Stage | What happens | Size |
+|---|---|---|
+| Download | NOAA MarineCadastre daily national files, April–June 2025, cropped to Chesapeake Bay and Hampton Roads with DuckDB | 43.9M reports |
+| Population | Class A transceivers only (commercial vessels; Class B is mostly pleasure craft) | 21.9M reports, about 2,400 vessels |
+| Clean | Drop bad identities, NOAA "not available" values, duplicates, single-report glitches | |
+| Tracks | Split each vessel at silences over 30 minutes; resample to a 2-minute grid | 15,117 tracks |
+| Windows | 64 steps (about 2 hours), stride 16, fully valid stretches only | 447K train · 60K validation · 56K test |
+| Split | Training: April–May, 70% of vessels. Validation and test: June, two disjoint vessel sets | no vessel or period on both sides |
+
+**Anomalies** are injected into copies of real held-out windows by seeded generators, so ground truth is exact:
+
+| Kind | What changes | Severity |
+|---|---|---|
+| Position spoof | Positions shift; reported speed and course do not | 0.1 to 5 nautical miles |
+| Teleport | One report jumps, then returns | 0.1 to 5 nmi |
+| AIS gap | The ship goes quiet, then reappears displaced | 10–40 min × 0–3 nmi jump |
+| Route deviation | The ship turns off its route; reports stay consistent | 5° to 90° |
+| Loitering | Transit replaced by slow circling | 16 to 64 minutes |
+
+The first three are **kinematic** (positions contradict what the ship reports). The last two are **behavioral** (the reports are consistent, only the behavior is odd). Behavioral anomalies go only into moving cargo, tanker, and passenger ships. A tug or fishing boat circling is normal work.
+
+## 5. How it was tested
+
+The project was designed so the results could not be quietly tuned to look good:
+
+- **Pre-registration.** Success criteria and their numeric margins were written in [`DATA_CONTRACT.md`](DATA_CONTRACT.md) and approved before any model trained on real data.
+- **Frozen test set.** It was built and checksummed before training, held out by time *and* vessel, and the benchmark code refuses to score it a second time with different inputs.
+- **Validation only for choices.** Every architecture option, ablation, and baseline setting was chosen on a separate validation anomaly set.
+- **Fair calibration.** Every detector, baselines included, is calibrated the same way, per vessel type and motion state.
+- **Honest uncertainty.** Windows from one ship are correlated, so confidence intervals come from a bootstrap that resamples *vessels* (172 of them), not windows.
+- **Changes on the record.** The contract was amended twice, both before the test set was scored, with the reason logged each time. Version 2 restricted the study to commercial vessels and fixed how behavioral anomalies were matched. Version 2.1 fixed a calibration flaw that sent 99% of the fused detector's alerts to stopped ships. The second amendment made the JEPA look *worse* (the Kalman baseline gained more from fair calibration) and was adopted anyway, with the margins unchanged. Every decision and its reason is in [`DECISIONS.md`](DECISIONS.md).
+
+## 6. Results
+
+Three-seed mean AUROC on the frozen test set (1.0 is perfect, 0.5 is chance). The last row is the false-alarm rate on normal test windows at the 1% budget set on validation.
+
+| AUROC | JEPA | Kalman | Raw-target predictor | Fused JEPA + Kalman | TrAISformer-style | LSTM autoencoder | Isolation Forest |
 |---|--:|--:|--:|--:|--:|--:|--:|
 | Loitering | **0.938** | 0.841 | 0.900 | 0.904 | 0.910 | 0.907 | 0.448 |
 | Route deviation | 0.677 | 0.634 | 0.694 | 0.664 | **0.722** | 0.592 | 0.502 |
 | Position spoof | 0.872 | **0.985** | 0.979 | 0.976 | 0.958 | 0.900 | 0.905 |
 | Teleport | 0.843 | **0.989** | 0.987 | 0.981 | 0.957 | 0.901 | 0.928 |
 | AIS gap | 0.832 | 0.815 | **0.835** | **0.835** | 0.794 | 0.682 | 0.675 |
-| False alarms on test normals at a 1% validation budget | 5.0% | 2.1% | 2.5% | 4.1% | **1.6%** | 1.8% | 3.3% |
+| False alarms on test normals | 5.0% | 2.1% | 2.5% | 4.1% | **1.6%** | 1.8% | 3.3% |
 
-The last three columns are baselines added after the main scoring, with settings chosen on validation and one separately recorded test scoring.
+The last three columns were added after the main scoring, with settings chosen on validation and one separately recorded test scoring.
 
-- **The JEPA ranks loitering best** (0.938 AUROC), on validation and test, with every seed; its lead over the next-best detector (0.027) is likely but its interval just reaches zero. That is also the one place where predicting in latent space clearly beats predicting raw features.
-- **A TrAISformer-style forecaster is the strongest learned detector overall.** Predicting the next step's binned motion, it ties the JEPA on behavioral anomalies (0.816 vs 0.807 mean AUROC; vessel-level bootstrap interval for the difference −0.027 to +0.042; also tied on validation), leads on route deviation, is far better on spoofs and teleports, holds the alert budget best (1.6% false alarms), and catches about half of injected loitering at that budget against the JEPA's quarter.
-- **It does not clear the pre-registered margin over Kalman on behavioral anomalies**: +0.070 AUROC against 0.10 (vessel-level bootstrap 95% interval 0.032 to 0.115).
-- **Fusing it with Kalman does not pay**: +0.019 AUROC and −0.061 AUPRC against Kalman alone.
-- **No detector held the 1% alert budget on new vessels.** Post hoc, four vessels raise 85% of the JEPA's false alarms: a cargo ship moored at the Norfolk terminals, a fishing vessel working the mid-bay near Reedville that trips every detector, a Baltimore Harbor pilot boat, and a Hampton Roads dredge. Dredge false alarms are unique to the JEPA.
-- On small spoofs and teleports the JEPA is near chance, where a Kalman filter is above 0.94.
+![AUROC against anomaly severity for five detectors](docs/figures/severity_curves.png)
 
-## Data
+**Pre-registered verdict: 3 of 8 criteria met.**
 
-| Dataset | Role |
-| --- | --- |
-| [NOAA MarineCadastre AIS](https://marinecadastre.gov/ais) | Pretraining on normal traffic in Chesapeake Bay and Hampton Roads (three months to start) |
-| [OMTAD](https://ro.ecu.edu.au/ecuworkspost2013/11764) | Benchmark evaluation, planned (Australian waters, CC BY-NC, not redistributed here) |
-| [Equation-grounded anomaly benchmark](https://github.com/snudial/open-maritime-anomaly-detection) | Labeled test sets, planned (A1 spoofing-like, A2 route deviation, A3 close approach) |
+| Criterion | Result | Required | Met |
+|---|---|---|---|
+| JEPA over Kalman, behavioral AUROC | +0.070 | +0.10 | no |
+| JEPA over Kalman, behavioral AUPRC | +0.039 | +0.05 | no |
+| Fused over Kalman, AUROC | +0.019 | +0.03 | no |
+| Fused over Kalman, AUPRC | −0.061 | ≥ 0 | no |
+| Fused over JEPA, AUROC | +0.040 | +0.03 | yes |
+| Fused over JEPA, AUPRC | +0.117 | +0.03 | yes |
+| Fused false alarms at the 1% budget | 4.1% | ≤ 2% | no |
+| Fused detection at budget vs Kalman | 0.501 vs 0.483 | ≥ Kalman | yes |
 
-Synthetic anomalies (position spoof, teleport, AIS gap, route deviation, loitering) are injected into held-out tracks with seeded, deterministic generators and a severity knob for each type. Rendezvous needs pairwise input and is a stretch goal.
+![Bootstrap intervals for the key comparisons](docs/figures/comparison_intervals.png)
 
-## Evaluation
+## 7. What I learned
 
-- **Baselines:** physics residual, Kalman-filter innovation (observes position and reported velocity), the same predictor on raw features (the key JEPA ablation), Isolation Forest, LSTM autoencoder, and a TrAISformer-style forecaster.
-- **Metrics:** AUROC and AUPRC per anomaly type and severity level; false-alarm and detection rates at a 1% validation alert budget. **Planned:** severity curves as figures, false alarms per 1,000 vessel-hours, time to detect.
-- **Ablations ([`ABLATION_RESULTS.md`](ABLATION_RESULTS.md), validation):** SIGReg weight (0, 0.02, 0.09, 0.3), action conditioning on/off, raw vs. latent target, anchored-window share, latent size, context length. SIGReg prevents collapse; action conditioning carries the prediction; latent prediction helps loitering and costs kinematic detection; a 64-dim latent matches the main model on behavioral kinds and beats it on kinematic ones. VICReg and EMA/stop-gradient deferred. Attention pooling, 4-step chunks, and location context were already compared on validation ([`reports/validation-v2.md`](reports/validation-v2.md)).
-- **Rigor:** 3 seeds per configuration; test set frozen before the first model run and scored once; pre-registered criteria; vessel-level bootstrap intervals.
+1. **Learned next-step predictors beat the Kalman filter on behavior, by a real but modest margin.** JEPA +0.070 AUROC (95% interval +0.032 to +0.115); TrAISformer-style forecaster +0.079 (+0.054 to +0.102). Both clearly above zero, neither confidently above the 0.10 I committed to.
+2. **The latent space was not the secret ingredient.** On behavioral anomalies the JEPA and a simpler forecaster that predicts binned observations are statistically tied (+0.009, interval −0.027 to +0.042). The JEPA ranks loitering best. The forecaster is better on spoofs, teleports, and route deviation, and holds the false-alarm budget best.
+3. **Physics wins on physics.** A Kalman filter that reads the ship's reported velocity is nearly perfect on spoofs and teleports. The JEPA, which pools 16 minutes into one latent, is near chance on the smallest ones.
+4. **Thresholds did not travel between fleets.** A 1% budget on validation vessels became 2–5% on new vessels. The misses are concentrated: four vessels raise 85% of the JEPA's false alarms. One is a cargo ship moored at a Norfolk terminal, one a fishing boat working the mid-bay, one a Baltimore Harbor pilot boat, and one a Hampton Roads dredge. Pilot launches and dredges move like nothing in training, and the JEPA has no notion of where the channels are.
 
-## Roadmap
+   ![Share of each detector's false alarms by ship type](docs/figures/false_alarms_by_type.png)
 
-| Phase | Weeks | Gate | Status |
-| --- | --- | --- | --- |
-| 1. Data pipeline and test sets | 1–3 | Test sets frozen before any model run | Done (`data_contract`, `pipeline_validated`) |
-| 2. JEPA and quick baselines | 4–6 | JEPA trains without collapse across 3 seeds | Done (`training_stable`); test set scored, `model_eval` pending owner approval |
-| 3. Full evaluation and ablations | 7–9 | Results tables frozen | Ablations done ([`ABLATION_RESULTS.md`](ABLATION_RESULTS.md)); `ablation_study` pending owner approval; remaining baselines next |
-| 4. Darkwater demo panel and write-up | 10–12 | Repo, write-up, and demo shipped | Not started (`demo_shipped`) |
+5. **The ablations explain the model.** Removing SIGReg collapses it (latent rank 2.6 of 192) and makes it worse than Kalman. Removing the reported-motion input raises prediction error about 30×. Predicting in latent space trades kinematic sensitivity for loitering. A smaller, 64-dimensional latent did as well on behavior and better on everything else. That was found after the test scoring, so it is the starting point for a next version rather than a swapped-in result. Details: [`ABLATION_RESULTS.md`](ABLATION_RESULTS.md).
+6. **Process mattered as much as the model.** A diagnostic I added before scoring caught a calibration flaw that made the fused detector look fine on AUROC while it never alerted on a moving ship. The pre-registered criteria did not catch it. Fixing it fairly cost the JEPA two validation passes, and that cost is recorded rather than hidden.
 
-## Repository layout
+## 8. Limitations and responsible use
 
-```
-latent-wake/
-  configs/eval.yaml   # paths, models, and settings for the gate checks and benchmark
-  latentwake/
-    data/             # download, clean, segment, resample, windows, synthetic traffic
-    inject/           # seeded anomaly injectors, write-once test sets
-    models/           # encoder, predictor, SIGReg, baselines
-    train.py score.py evaluate.py posthoc.py checks.py
-  scripts/            # Meridian gate checks (validate-*.sh, run-benchmark.sh) and Meridian tooling
-  tests/
-  reports/            # validation reports, test-set manifests, eval-v2 results and post-hoc analysis
-  docs/SCOPE.md       # original project scope
-  DATA_CONTRACT.md  DECISIONS.md  EVAL_RESULTS.md  MODEL_CARD.md  CHANGELOG.md
-```
+- **Synthetic anomalies.** Real spoofing, loitering, and dark activity may not look like the injectors. The results measure detection of the injected patterns.
+- **One region, one season, commercial vessels only.** Chesapeake Bay and Hampton Roads, April–June 2025, Class A transceivers.
+- **Thresholds need local calibration.** On new vessels, the false-alarm rate was two to five times the budget.
+- **Not for enforcement.** A flag means a track was unusual to a model, not that anyone did anything wrong. Vessels are anonymized in every published report and in the demo panel. The tracks themselves are public AIS.
 
-## Stack
+## 9. What's next
 
-Python 3.11, PyTorch (CUDA), DuckDB, pandas and NumPy on Parquet, scikit-learn metrics, pytest; per-run `metrics.jsonl` for tracking; [Meridian](https://github.com/PCSchmidt/meridian) for gates.
+- Carry forward the **64-dimensional latent**, equal on behavior and better elsewhere on validation.
+- Add a **fixed shipping-lane prior** (traffic density or charted channels) for route deviation. A learned per-cell location embedding helped there but overfit.
+- **Fuse by anomaly kind** (Kalman for kinematic, a forecaster for behavioral) under a new pre-registration, instead of taking the maximum of two scores.
+- **Per-vessel or per-fleet calibration**, so thresholds transfer, and context masks for pilot stations, anchorages, and dredging areas.
+- Evaluate on the **equation-grounded benchmark** and run the deferred **VICReg / EMA** ablations.
 
-## Getting started
+## 10. How the project was run
 
-```bash
-git clone https://github.com/PCSchmidt/latent-wake.git
-cd latent-wake
-uv venv --python 3.11
-# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-uv pip install -e ".[dev]"
-pytest -q
-```
+The project ran under [**Meridian**](https://github.com/PCSchmidt/meridian), my own harness for governing AI-assisted engineering. Work moves through gates. Each gate passes only when scripted checks pass, and the four that carry judgment need my explicit approval in my own terminal:
 
-### Step 1: download and crop AIS data
+| Gate | Passes when |
+|---|---|
+| `data_contract` (owner) | Success criteria and margins complete, no open decisions |
+| `pipeline_validated` | Real data processed with no failed days, splits leak-free, test set frozen |
+| `training_stable` | Three seeds per latent model, none collapsed |
+| `model_eval` (owner) | Test set scored exactly once by the pre-registered rules, verdict recorded pass or fail |
+| `ablation_study` (owner) | Ablations written up |
+| `demo_shipped` (owner) | Write-up, model card, changelog; all tests green |
 
-```bash
-python -m latentwake.data.download --region chesapeake --start 2025-04-01 --end 2025-06-30
-```
+The code was written by an AI coding agent (Claude, through Claude Code). I acted as owner: scoping the project, choosing the region and claims, approving every gate and contract amendment, running all training on my laptop, and reviewing results. Meridian's job is to make that division of labor trustworthy. The agent cannot pass an owner gate, and the checks, not anyone's report of them, decide when work is done.
 
-This streams each NOAA national daily file (`ais-YYYY-MM-DD.csv.zst`), crops it to the Chesapeake Bay and Hampton Roads box with DuckDB, writes `data/interim/chesapeake/ais-YYYY-MM-DD.parquet`, and deletes the national file. Re-running skips finished days. `data/interim/chesapeake/manifest.jsonl` records rows, vessels, and any failures for each day.
+## 11. Repository guide
 
-Useful flags: `--workers 2` (days in parallel), `--keep-raw` (keep national files, which are large), `--memory-limit 4GB` (DuckDB memory per worker). Try a single day first (`--start 2025-04-01 --end 2025-04-01`) and check the manifest's `missing_optional` field to confirm the schema matched.
+**Suggested reading order:** this README → [`docs/WRITEUP.md`](docs/WRITEUP.md) → [`EVAL_RESULTS.md`](EVAL_RESULTS.md) → [`DECISIONS.md`](DECISIONS.md).
 
-The box in `latentwake/data/regions.py` is a loose first pass. Plot the first day's points and tighten it if needed. Only 2025-and-later daily files are supported so far.
+| Document | What it is |
+|---|---|
+| [`docs/WRITEUP.md`](docs/WRITEUP.md) | The project write-up, with figures and references |
+| [`EVAL_RESULTS.md`](EVAL_RESULTS.md) | Test results: generated tables, verdict, interpretation, baselines, intervals |
+| [`ABLATION_RESULTS.md`](ABLATION_RESULTS.md) | What each model component contributes (validation) |
+| [`MODEL_CARD.md`](MODEL_CARD.md) | Model details, data, intended use, limitations |
+| [`DATA_CONTRACT.md`](DATA_CONTRACT.md) | The pre-registered success criteria and amendment log (unchanged since scoring) |
+| [`DECISIONS.md`](DECISIONS.md) | Every decision, why, alternatives, and who made it |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed in what is measured, by date |
+| [`docs/SCOPE.md`](docs/SCOPE.md) | The original 12-week scope, kept as written |
+| [`docs/REPRODUCE.md`](docs/REPRODUCE.md) | Every command, from download to demo panel |
+| [`SPEC.md`](SPEC.md), [`CONTRACT.md`](CONTRACT.md), [`MERIDIAN.md`](MERIDIAN.md) | Meridian's feature spec, project contract, and generated rules |
+| [`reports/`](reports/) | Validation reports, test-set manifests, raw results, post-hoc analysis |
 
-### Step 2: clean, resample, and window
+| Code | What it does |
+|---|---|
+| `latentwake/data/` | Download, crop, clean, resample, window, split; synthetic traffic for tests |
+| `latentwake/inject/` | Seeded anomaly injectors; write-once, checksummed test sets |
+| `latentwake/models/` | The JEPA (encoder, predictor, SIGReg), Kalman and physics baselines, learned baselines |
+| `latentwake/train.py`, `train_baseline.py`, `select_baselines.py` | Training and validation-only model selection |
+| `latentwake/score.py`, `evaluate.py` | Calibration and evaluation |
+| `latentwake/checks.py` | The gate checks; the benchmark that scores the test set once |
+| `latentwake/posthoc.py`, `export_panel.py` | Bootstrap intervals, false-alarm forensics, demo export |
+| `scripts/` | Meridian gate scripts and figure generation |
+| `tests/` | 92 tests, run as part of the final gate |
 
-```bash
-python -m latentwake.data.preprocess --interim data/interim/chesapeake --out data/processed/chesapeake
-```
+**Stack:** Python 3.11, PyTorch, DuckDB, pandas, NumPy, scikit-learn, pytest; Meridian for gates; the demo is SQLite in the browser (sql.js) on GitHub Pages. **Hardware:** one laptop, RTX A4500 (16 GB).
 
-Keeps Class A transceivers only (contract v2; `--transceivers all` for the Class B secondary analysis, written to another `--out`), drops bad identities, NOAA "not available" sentinels, duplicates, and single-report position glitches; splits each vessel into tracks at silences over 30 minutes (logged to `gaps.parquet`); resamples to a shared 2-minute grid, marking any step that would need more than 3 missing steps of interpolation as invalid; computes per-step relative-motion features and a 0.05° location grid cell (used only by the position-context option); and cuts 64-step windows (about 2 hours) with stride 16 over fully valid stretches only.
-
-Splits are by time *and* vessel: training uses 70% of vessels before the cutoff (two-thirds through the data by default); validation and test use the other 30% after it. No vessel or time period appears on both sides. Feature statistics come from the training split only. `stats.json` records row counts at every stage.
-
-### Step 3: build and freeze a test set
-
-```bash
-python -m latentwake.inject.build --processed data/processed/chesapeake --split test \
-    --out data/testsets/chesapeake-test-v2
-```
-
-Injects seeded anomalies into copies of held-out windows, one cell per kind and severity level, alongside untouched normal windows. The output carries a SHA-256 checksum: loading verifies it, and saving refuses to overwrite, so the test set is fixed before any model sees it.
-
-| Kind | What changes | Severity knob |
-| --- | --- | --- |
-| `position_spoof` | Positions shift; reported speed and course do not | Offset, 0.1 to 5 nmi |
-| `teleport` | One report jumps, then returns | Distance, 0.1 to 5 nmi |
-| `ais_gap` | Vessel goes dark, reports go stale, reappears displaced | Gap length × jump distance |
-| `route_deviation` | Vessel turns off its route, reports stay consistent | Turn, 5° to 90° |
-| `loitering` | Transit replaced by slow circling, reports stay consistent | Duration, 16 to 64 min |
-
-The first three are kinematically *inconsistent* (positions contradict reported motion). The last two are *consistent* (only the behavior is unusual), which tests whether a model learned normal behavior rather than just physics.
-
-**Evaluation rule (contract v2):** `route_deviation` and `loitering` are injected only into moving cargo, tanker, and passenger windows, and scored only against normal windows from that same population (moving, `source_mean_sog >= 3`, transit class). Loitering is ordinary work for a tug or fishing boat, and anchored ships are trivially "normal," so any other comparison rewards telling vessel types or motion apart, not finding anomalies. On synthetic data, a plain physics-consistency check scores about 0.73 AUROC on them unmatched and 0.48 matched. The kinematic kinds go into every Class A vessel.
-
-### Step 4: train
+**Run it:** see [`docs/REPRODUCE.md`](docs/REPRODUCE.md). In short:
 
 ```bash
-python -m latentwake.train --processed data/processed/chesapeake --out runs/jepa-s0 --seed 0
+git clone https://github.com/PCSchmidt/latent-wake.git && cd latent-wake
+uv venv --python 3.11 && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+uv pip install -e ".[dev]" && pytest -q
 ```
 
-Defaults follow LeWorldModel: SIGReg weight 0.09 with 17 knots and 1,024 projections, AdamW, gradient clip 1.0, no EMA or stop-gradient. Learning rate 3e-4 with warmup and cosine decay, batch 256, 30 epochs, bf16 on CUDA. Anchored and moored windows are kept at 25% (`--stationary-keep`) so they don't dominate training.
+## 12. References and acknowledgments
 
-Each epoch logs training and validation prediction loss, SIGReg, and `val_erank`, the effective rank of validation latents. A healthy run stays well above 1. A slide toward 1 means collapse, and the log flags it. Ablations are flags: `--target raw` (no encoder, no SIGReg), `--no-action`, `--sigreg-weight 0`, `--embed-dim 64` (latent size), `--window-len 32` (context; each 64-step window is scored as two consecutive 32-step windows). Architecture options, chosen on validation data only: `--pooling attention`, `--chunk-len 4`, `--use-position` (adds a location-cell embedding per chunk). `--size small` is a 0.8M-parameter version for CPU debugging; the full model is 10.1M.
+- Maes, Le Lidec, Scieur, LeCun, and Balestriero. *LeWorldModel: Stable End-to-End Joint-Embedding Predictive Architecture from Pixels.* [arXiv:2603.19312](https://arxiv.org/abs/2603.19312), 2026 ([project page](https://le-wm.github.io/), [code](https://github.com/lucas-maes/le-wm)). SIGReg and the AdaLN-zero transformer blocks in `latentwake/models/blocks.py` are adapted from that repository (MIT License, copyright 2026 Lucas Maes).
+- Balestriero and LeCun. *LeJEPA: Provable and Scalable Self-Supervised Learning Without the Heuristics.* [arXiv:2511.08544](https://arxiv.org/abs/2511.08544), 2025. The origin of SIGReg.
+- Nguyen and Fablet. *TrAISformer: A Transformer Network with Sparse Augmented Data Representation and Cross Entropy Loss for AIS-based Vessel Trajectory Prediction.* [arXiv:2109.03958](https://arxiv.org/abs/2109.03958). The forecaster baseline follows it.
+- *Redefining Maritime Anomaly Detection via Equation-Grounded Synthetic Anomalies.* [arXiv:2606.29721](https://arxiv.org/abs/2606.29721), 2026. The motivation for the kinematic anomaly kinds.
+- AIS data: [NOAA / BOEM MarineCadastre](https://marinecadastre.gov/ais), public domain.
 
-### Step 5: evaluate
-
-```bash
-python -m latentwake.evaluate --testset data/testsets/chesapeake-test-v2 \
-    --processed data/processed/chesapeake --out reports/eval-v2 \
-    --model jepa=runs/jepa-s0/best.pt --model raw=runs/raw-s0/best.pt
-```
-
-Always includes two non-learned baselines: a physics residual (observed motion versus reported speed and course) and a constant-velocity Kalman filter that observes position and reported velocity and scores each step by normalized innovation squared. Every detector, baselines included, is calibrated per stratum, vessel class × under way (mean reported speed ≥ 1 kn), as its validation tail probability (contract v2.1), so a fishing boat's jitter isn't scored like a tanker's, an anchored tanker isn't scored like one in the channel, and a 1% alert budget spreads across strata instead of piling onto the ones whose scores barely vary. `--calibration mad` gives the older median/MAD z-scores. Writes AUROC and AUPRC per anomaly cell to `results.csv` and `summary.md`.
-
-Use `latentwake.evaluate` directly only on validation anomaly sets. The frozen test set is scored through `bash scripts/run-benchmark.sh`, which reads `configs/eval.yaml`, records its inputs, and refuses to score the test set a second time with different ones. `python -m latentwake.checks report` writes EVAL_RESULTS.md from what it recorded.
-
-### Learned baselines
-
-```bash
-python -m latentwake.select_baselines grid                  # Isolation Forest, LSTM-AE, TrAISformer-style; seed 0
-python -m latentwake.select_baselines evaluate              # validation anomaly set only
-python -m latentwake.select_baselines select --train-seeds  # winner per kind, then seeds 1 and 2
-python -m latentwake.checks benchmark configs/eval-baselines.yaml   # one recorded test scoring
-```
-
-Settings are picked on validation by a rule fixed in advance (DECISIONS.md); the test scoring is recorded and refuses a second look like the main benchmark. Each baseline scores a window with one number (Isolation Forest on window statistics; LSTM-autoencoder and TrAISformer-style per-step error or negative log-likelihood, maximum over the window) and is calibrated like every other detector.
-
-### Step 6: post-hoc analysis
-
-```bash
-python -m latentwake.posthoc
-```
-
-Exploratory, from the saved scores only: a cluster bootstrap over source vessels for each criterion difference; test false alarms by stratum, by vessel, and by each vessel's AIS ship-type code (pilot boats and dredges sit in the "other" class); and the most-alarming vessels with their typical position. It never re-scores the test set and does not change the verdict.
-
-### Working offline with synthetic traffic
-
-```bash
-python -m latentwake.data.synthetic --days 9 --vessels 50 --out data/interim/synthetic
-python -m latentwake.data.preprocess --interim data/interim/synthetic --out data/processed/synthetic
-```
-
-`latentwake.data.synthetic` writes days in exactly the download step's format: simple ship kinematics (transits, tugs, ferries, fishing boats, anchored ships) with realistic reporting flaws. It has no coastline and is not a model of the real bay. It exists for tests and for building the model before real data arrives.
-
-
-### Step 7: export the Darkwater panel
-
-```bash
-python -m latentwake.export_panel --out ../darkwater/sql/latentwake/data.sql
-cd ../darkwater && python3 build.py
-```
-
-Writes an anonymized sample of the scored test set (tracks, recorded scores and thresholds, per-step surprise for display, a traffic-density grid, and the recorded scoreboard) as SQL for Darkwater's [Latent Wake page](https://pcschmidt.github.io/darkwater/latent-wake.html). No MMSIs, names, or timestamps are exported.
-
-## Governance: Meridian gates
-
-This project runs under [Meridian](https://github.com/PCSchmidt/meridian) (`ml-research` recipe), adapted to the 12-week plan. Each phase ends at a gate that a script, not an agent's say-so, decides:
-
-| Gate | Passes when | Check |
-|---|---|---|
-| `data_contract` (owner approves) | DATA_CONTRACT.md has no open `[DECIDE]` items and complete thresholds | `validate-data-contract.sh` |
-| `pipeline_validated` | Real data cropped with no failed days, splits leak-free, test set frozen | `validate-schema/preprocessing/splits/testset.sh`, unit tests |
-| `training_stable` | Three or more seeds per latent model, none collapsed | `validate-training.sh` |
-| `model_eval` (owner approves) | Every model trained after the test set froze; the test set scored exactly once; the verdict on every contract criterion recorded in EVAL_RESULTS.md, pass or fail | `run-benchmark.sh`, `validate-metrics.sh` |
-| `ablation_study` (owner approves) | ABLATION_RESULTS.md written | — |
-| `demo_shipped` (owner approves) | Write-up, model card, changelog; full test suite green | `run-all-tests.sh` |
-
-```bash
-bash scripts/gate-engine.sh current                 # which gate is open
-bash scripts/gate-engine.sh verify data_contract    # run its checks
-bash scripts/gate-engine.sh mark-passed data_contract --approve "DATA CONTRACT APPROVED"   # owner only
-```
-
-Paths for every check live in `configs/eval.yaml`. The checks themselves are in `latentwake/checks.py`; each exits 2 to block. The success criteria are in [`DATA_CONTRACT.md`](DATA_CONTRACT.md), and the decision log is in [`DECISIONS.md`](DECISIONS.md). Meridian needs `jq` and [mikefarah's `yq`](https://github.com/mikefarah/yq).
-
-## Related projects
-
-- [Darkwater](https://github.com/PCSchmidt/darkwater): maritime shadow-fleet demo. Latent Wake scores will feed a ranked-vessel panel there.
-- [chokepoint_app](https://github.com/PCSchmidt/chokepoint_app): maritime chokepoint intelligence.
-
-## Acknowledgments
-
-The training recipe builds on [LeWorldModel](https://github.com/lucas-maes/le-wm) by Maes, Le Lidec, Scieur, LeCun, and Balestriero. SIGReg and the AdaLN-zero transformer blocks in `latentwake/models/blocks.py` are adapted from that repository (MIT License, copyright 2026 Lucas Maes).
+**Related projects:** [Darkwater](https://github.com/PCSchmidt/darkwater) (shadow-fleet surveillance demo where SQLite is the whole application; hosts the Latent Wake panel) · [Meridian](https://github.com/PCSchmidt/meridian) (the harness that governed this build) · [chokepoint_app](https://github.com/PCSchmidt/chokepoint_app) (maritime chokepoint intelligence).
 
 ## License
 

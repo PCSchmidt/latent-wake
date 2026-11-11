@@ -7,7 +7,7 @@
 > scoring uses per-stratum validation tail probabilities rather than per-type z-scores; behavioral
 > anomalies go only into moving cargo, tanker, and passenger vessels; rendezvous and identity swaps
 > were not built. The success criteria became the pre-registered margins in `DATA_CONTRACT.md`, and the
-> one test scoring met 3 of 8 (`EVAL_RESULTS.md`). Every change and its reason is in `DECISIONS.md`.
+> one test scoring met 3 of 8 (`EVAL_RESULTS.md`). The project shipped on 2026-11-11 (`README.md`). Every change and its reason is in `DECISIONS.md`.
 
 ## Summary
 

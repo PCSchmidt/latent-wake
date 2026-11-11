@@ -25,12 +25,20 @@ plan is in `docs/SCOPE.md`; the success criteria are in `DATA_CONTRACT.md`.
 - Download, cleaning, resampling, and windowing of three months of NOAA AIS
 - Seeded synthetic anomaly injection and frozen, checksummed test sets
 - The JEPA model, training, per-stratum calibration, and evaluation
-- Baselines: physics residual, Kalman filter, raw-target predictor (built);
-  LSTM autoencoder, Isolation Forest, TrAISformer-style forecaster (planned)
+- Baselines: physics residual, Kalman filter, raw-target predictor, LSTM
+  autoencoder, Isolation Forest, TrAISformer-style forecaster
 - Ablations: SIGReg weight, SIGReg vs VICReg vs EMA, action on/off, context length, latent size
 - Evaluation on OMTAD's equation-grounded benchmark
-- A static Darkwater panel of precomputed scores for a replay week
-- A write-up with code, configs, and weights
+- A static Darkwater panel of precomputed scores
+- A write-up with code and configs
+
+### Outcome (2026-11-11)
+
+Shipped; all six gates passed. Delivered: everything above except the OMTAD /
+equation-grounded evaluation (not done), the VICReg and EMA ablations
+(deferred), and published weights (not published). The Darkwater panel shows
+an anonymized sample of the scored test set rather than a replay week.
+Pre-registered verdict: 3 of 8 criteria met (EVAL_RESULTS.md).
 
 ### Out of scope
 

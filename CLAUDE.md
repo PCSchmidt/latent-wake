@@ -9,8 +9,8 @@ Latent Wake: a trajectory JEPA that flags anomalous AIS vessel tracks. Plan in
 - Never train on real data before `data_contract` passes, and never before the
   test set is frozen (`validate-testset.sh`, `run-benchmark.sh` enforce this).
 - Never tune against a test set; calibrate on validation only (contract v2.1).
-- Test set v2 was scored once (2026-11-09, 3 of 8 criteria met). Never re-score
-  it; analyze saved scores with `latentwake.posthoc`.
+- Shipped 2026-11-11 (all gates passed; 3 of 8 criteria met). Never re-score
+  test set v2; analyze saved scores with `latentwake.posthoc`.
 - Owner-approval gates are approved by Chris in his own terminal, not by an agent.
 
 ## What Meridian is
